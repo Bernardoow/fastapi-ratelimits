@@ -1,0 +1,39 @@
+[project]
+site_name = "fastapi-ratelimits"
+site_description = "Asynchronous rate limiting for FastAPI"
+site_url = "https://bernardoow.github.io/fastapi-ratelimits/"
+repo_url = "https://github.com/Bernardoow/fastapi-ratelimits"
+docs_dir = "docs/en"
+site_dir = "site"
+nav = [
+  { "Home" = "index.md" },
+  { "Quickstart" = "quickstart.md" },
+  { "Rules and identity" = "rules.md" },
+  { "Storage and strategies" = "storage.md" },
+  { "Responses and headers" = "responses.md" },
+  { "API reference" = "reference.md" },
+]
+
+[project.theme]
+variant = "modern"
+language = "en"
+features = ["content.code.copy", "navigation.footer"]
+
+[project.extra]
+alternate = [
+  { name = "English", link = "/fastapi-ratelimits/", lang = "en" },
+  { name = "Português (Brasil)", link = "/fastapi-ratelimits/pt-br/", lang = "pt-BR" },
+]
+
+[project.plugins.mkdocstrings.handlers.python]
+paths = ["src"]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+docstring_style = "google"
+heading_level = 3
+members = false
+merge_init_into_class = true
+show_root_full_path = false
+show_root_heading = true
+show_signature_annotations = true
+show_source = false
