@@ -26,7 +26,7 @@ async def orders():
     return {"orders": []}
 ```
 
-Each client IP gets two requests per minute to `GET /orders`. The
+In this single-process example, each client IP gets two requests per minute to `GET /orders`. The
 [Quickstart](https://bernardoow.github.io/fastapi-ratelimits/quickstart/) shows
 how to run the app and see the `429` response.
 
