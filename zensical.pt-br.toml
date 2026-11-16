@@ -1,0 +1,26 @@
+[project]
+site_name = "fastapi-ratelimits"
+site_description = "Limitação assíncrona de requisições para FastAPI"
+site_url = "https://bernardoow.github.io/fastapi-ratelimits/pt-br/"
+repo_url = "https://github.com/Bernardoow/fastapi-ratelimits"
+docs_dir = "docs/pt-br"
+site_dir = "site/pt-br"
+nav = [
+  { "Início" = "index.md" },
+  { "Início rápido" = "quickstart.md" },
+  { "Regras e identidade" = "rules.md" },
+  { "Storage e estratégias" = "storage.md" },
+  { "Respostas e cabeçalhos" = "responses.md" },
+  { "Referência da API (em inglês)" = "https://bernardoow.github.io/fastapi-ratelimits/reference/" },
+]
+
+[project.theme]
+variant = "modern"
+language = "pt-BR"
+features = ["content.code.copy", "navigation.footer"]
+
+[project.extra]
+alternate = [
+  { name = "English", link = "/fastapi-ratelimits/", lang = "en" },
+  { name = "Português (Brasil)", link = "/fastapi-ratelimits/pt-br/", lang = "pt-BR" },
+]
