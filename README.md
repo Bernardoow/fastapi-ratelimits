@@ -7,10 +7,8 @@ Python 3.11 or newer.
 [English documentation](https://bernardoow.github.io/fastapi-ratelimits/)
 · [Documentação em português](https://bernardoow.github.io/fastapi-ratelimits/pt-br/)
 
-## Get started
-
-From the repository checkout, install the package with `pip install .`.
-Use `pip install '.[redis]'` for Redis support.
+Install the package with `pip install fastapi-ratelimits`. For Redis, use
+`pip install 'fastapi-ratelimits[redis]'`.
 
 ```python
 from fastapi import Depends, FastAPI
@@ -53,6 +51,3 @@ to `site/pt-br/` under the English build's output.
 uv run --locked --no-dev --group docs zensical build --clean --strict
 uv run --locked --no-dev --group docs zensical build --clean --strict --config-file zensical.pt-br.toml
 ```
-
-Set **Settings → Pages → Source** to **GitHub Actions** on the repository to
-enable automatic publication from `main`.
