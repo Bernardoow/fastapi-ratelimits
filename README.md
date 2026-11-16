@@ -7,7 +7,7 @@ Python 3.11 or newer.
 [English documentation](https://bernardoow.github.io/fastapi-ratelimits/)
 · [Documentação em português](https://bernardoow.github.io/fastapi-ratelimits/pt-br/)
 
-Instale o pacote com `pip install fastapi-ratelimits`. Para Redis, use
+Install the package with `pip install fastapi-ratelimits`. For Redis, use
 `pip install 'fastapi-ratelimits[redis]'`.
 
 ```python
