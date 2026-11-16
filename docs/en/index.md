@@ -7,6 +7,8 @@ Requires Python 3.11 or newer.
 
 [Set up your first limit](quickstart.md){ .md-button .md-button--primary }
 
+- [FastAPI dependencies](dependencies.md) shows where to declare `Depends`
+  for operations, routers, and the whole app.
 - [Rules and identity](rules.md) explains quotas per route, shared quotas, and
   dynamic costs.
 - [Storage and strategies](storage.md) covers Redis across workers and choosing
