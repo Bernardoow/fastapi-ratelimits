@@ -51,6 +51,3 @@ to `site/pt-br/` under the English build's output.
 uv run --locked --no-dev --group docs zensical build --clean --strict
 uv run --locked --no-dev --group docs zensical build --clean --strict --config-file zensical.pt-br.toml
 ```
-
-Set **Settings → Pages → Source** to **GitHub Actions** on the repository to
-enable automatic publication from `main`.
