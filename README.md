@@ -6,8 +6,8 @@ Requer Python 3.11 ou superior.
 
 ## Primeiro limite
 
-Instale o pacote com `pip install .` a partir deste repositório. Para Redis, use
-`pip install '.[redis]'`.
+Instale o pacote com `pip install fastapi-ratelimits`. Para Redis, use
+`pip install 'fastapi-ratelimits[redis]'`.
 
 ```python
 from fastapi import Depends, FastAPI

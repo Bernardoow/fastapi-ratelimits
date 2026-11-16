@@ -3,11 +3,17 @@ name = "fastapi-ratelimits"
 version = "0.1.0"
 description = "Async rate limiting for FastAPI dependencies, powered by limits"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
-    { name = "Bernardo Gomes", email = "bgomesdeabreu@gmail.com" }
+    { name = "Bernardo Gomes" }
 ]
 requires-python = ">=3.11"
 dependencies = ["fastapi>=0.163.1,<1", "limits>=5.8,<6"]
+
+[project.urls]
+Repository = "https://github.com/Bernardoow/fastapi-ratelimits"
+Issues = "https://github.com/Bernardoow/fastapi-ratelimits/issues"
 
 [project.optional-dependencies]
 redis = ["redis>=5.2,<8"]
