@@ -5,7 +5,7 @@ in-memory storage and runs in one process.
 
 ## Install from the repository
 
-Run the following commands in an active Python 3.11 or newer virtual environment.
+Use an active Python 3.11 or newer virtual environment.
 
 ```sh
 git clone https://github.com/Bernardoow/fastapi-ratelimits.git
@@ -27,7 +27,7 @@ app = FastAPI(lifespan=limiter.lifespan)
 
 
 @app.get("/orders", dependencies=[Depends(limiter.limit("2/minute"))])
-async def orders():
+async def orders() -> dict[str, list[str]]:
     return {"orders": []}
 ```
 
@@ -50,22 +50,50 @@ with `Retry-After` in seconds. Restart the server to reset the in-memory counter
 
 ## Use an existing lifespan
 
-If the app already has a lifespan function, enter `limiter.lifespan(app)`
-inside it. Put the application's existing setup and cleanup around `yield`.
+Enter `limiter.lifespan(app)` inside the app's lifespan function before it starts
+serving requests. If you have more than one limiter, enter each context. The
+app below uses a fixed window on every operation and a tighter moving window
+on `/orders`. An `AsyncExitStack` closes both contexts at shutdown.
 
-```python
-from contextlib import asynccontextmanager
+Save this version as `app.py` and run `python -m uvicorn app:app`.
 
+```python title="app.py"
+from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack, asynccontextmanager
+
+from fastapi import Depends, FastAPI
+
+from fastapi_ratelimits import Limiter
+
+baseline = Limiter(storage_uri="async+memory://")
+orders_quota = Limiter(storage_uri="async+memory://", strategy="moving-window")
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    async with limiter.lifespan(app):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    async with AsyncExitStack() as stack:
+        await stack.enter_async_context(baseline.lifespan(app))
+        await stack.enter_async_context(orders_quota.lifespan(app))
         yield
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    lifespan=lifespan,
+    dependencies=[Depends(baseline.limit("10/minute"))],
+)
+
+
+@app.get("/orders", dependencies=[Depends(orders_quota.limit("1/minute"))])
+async def orders() -> list[str]:
+    return []
+
+
+@app.get("/status")
+async def status() -> dict[str, bool]:
+    return {"ok": True}
 ```
 
-Use `FastAPI(lifespan=lifespan)` in place of the original `FastAPI(...)` line,
-before attaching routes. When you run multiple workers, use a
-[shared Redis backend](storage.md#redis).
+Two requests to `/orders` return `200` and `429`. A request to `/status`
+still returns `200` under the app-level rule.
+
+See [FastAPI dependencies](dependencies.md) for more ways to apply rules and
+[Redis](storage.md#redis) to share counters across workers.

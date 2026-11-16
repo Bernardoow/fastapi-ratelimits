@@ -1,56 +1,138 @@
 # Responses and headers
 
-## When a request is rejected
+## Know the default responses
 
-| Status | Cause | What the client receives |
+| Status | Cause | Default response |
 | --- | --- | --- |
-| `429 Too Many Requests` | A rule denied the request. | A `Retry-After` header with an estimate in whole seconds based on the denying rule's window. |
-| `503 Service Unavailable` | An operational failure prevented the storage backend from processing the rule. | An error response. The endpoint does not run. |
+| `429 Too Many Requests` | A rule denied the request. | `{"detail":"Rate limit exceeded"}` and `Retry-After`, an estimate in whole seconds based on the denying rule's window. |
+| `503 Service Unavailable` | An operational storage failure prevented a rule from completing. | `{"detail":"Rate limit storage unavailable"}`. The endpoint does not run. |
 
-Register FastAPI exception handlers for `RateLimitExceeded` and
-`StorageUnavailable` to customize these responses. When overriding `429`, pass
-through `exc.headers` to preserve `Retry-After`.
+FastAPI handles `RateLimitExceeded` and `StorageUnavailable` as HTTP
+exceptions by default. You can register
+`rate_limit_exceeded_handler` and `storage_unavailable_handler` explicitly
+to keep that behavior, or register your own handlers to change the body.
+Preserve `exc.headers` when customizing `429` so clients still receive
+`Retry-After`.
 
-```python
-from fastapi import Request
+## Add quota headers
+
+Enable `RateLimitHeadersMiddleware` for responses with a status below
+`400` when at least one rule admitted the request, including streaming
+responses. The default formatter selects the rule with the lowest fraction
+of quota remaining. If fractions tie, the first evaluated rule wins.
+
+| Default header | Value |
+| --- | --- |
+| `X-RateLimit-Limit` | The selected rule's quota amount. |
+| `X-RateLimit-Remaining` | The selected rule's remaining quota after admission. |
+| `X-RateLimit-Reset` | The selected rule's reset time as a Unix timestamp in seconds, rounded up. |
+
+Provide `headers_func` to customize the headers. The callback receives a
+tuple of `RateLimitSnapshot` objects in evaluation order and returns a
+mapping of header names to strings. Each snapshot records `limit`,
+`remaining`, `reset_at`, `cost`, `scope`, and whether the quota is shared
+through `group` (`shared`). These are observations at the time the rule ran.
+Concurrent requests can change the remaining quota before a client reads the
+header.
+
+## Run the default and custom configurations
+
+With the [quickstart installation](quickstart.md), save this as `app.py`.
+The demo can use an intentionally failing storage to reproduce a `503`
+without a Redis server.
+
+```python title="app.py"
+import os
+
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
+from limits.aio.storage import MemoryStorage
 
-from fastapi_ratelimits import RateLimitExceeded
+from fastapi_ratelimits import (
+    Limiter,
+    RateLimitExceeded,
+    RateLimitHeadersMiddleware,
+    RateLimitSnapshot,
+    StorageUnavailable,
+    default_rate_limit_headers,
+    rate_limit_exceeded_handler,
+    storage_unavailable_handler,
+)
 
 
-@app.exception_handler(RateLimitExceeded)
-async def quota_exceeded(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+class UnavailableStorage(MemoryStorage):
+    async def incr(self, key: str, expiry: float, amount: int = 1) -> int:
+        raise ConnectionError("Simulated storage outage")
+
+
+async def quota_exceeded(_request: Request, exc: RateLimitExceeded) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,
         content={"error": "quota_exceeded"},
         headers=exc.headers,
     )
+
+
+async def unavailable(_request: Request, exc: StorageUnavailable) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": "quota_temporarily_unavailable"},
+    )
+
+
+async def quota_headers(snapshots: tuple[RateLimitSnapshot, ...]) -> dict[str, str]:
+    headers = dict(await default_rate_limit_headers(snapshots))
+    snapshot = snapshots[0]
+    headers["X-Quota-Cost"] = str(snapshot.cost)
+    if snapshot.shared:
+        headers["X-Quota-Scope"] = snapshot.scope
+    return headers
+
+
+if os.environ.get("SIMULATE_OUTAGE") == "1":
+    limiter = Limiter(storage=UnavailableStorage())
+else:
+    limiter = Limiter(storage_uri="async+memory://")
+
+app = FastAPI(lifespan=limiter.lifespan)
+mode = os.environ.get("RESPONSE_MODE")
+if mode == "custom":
+    app.add_exception_handler(RateLimitExceeded, quota_exceeded)
+    app.add_exception_handler(StorageUnavailable, unavailable)
+    app.add_middleware(RateLimitHeadersMiddleware, headers_func=quota_headers)
+else:
+    if mode == "builtin":
+        app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+        app.add_exception_handler(StorageUnavailable, storage_unavailable_handler)
+    app.add_middleware(RateLimitHeadersMiddleware)
+
+
+@app.get("/orders", dependencies=[Depends(limiter.limit("2/minute", group="orders", cost=2))])
+async def orders() -> list[str]:
+    return []
 ```
 
-## Add quota headers
+Run one of these commands at a time.
 
-Register `RateLimitHeadersMiddleware` before starting the app.
-
-```python
-from fastapi_ratelimits import RateLimitHeadersMiddleware
-
-app.add_middleware(RateLimitHeadersMiddleware)
+```sh
+python -m uvicorn app:app
+RESPONSE_MODE=custom python -m uvicorn app:app
+RESPONSE_MODE=custom SIMULATE_OUTAGE=1 python -m uvicorn app:app
 ```
 
-The middleware adds these headers to responses with a status below `400` when
-at least one rule admitted the request. Streaming responses are supported.
+For each server run, send two requests from the same client.
 
-| Header | Value |
-| --- | --- |
-| `X-RateLimit-Limit` | The selected rule's quota amount. |
-| `X-RateLimit-Remaining` | The selected rule's remaining quota after admitting the request. |
-| `X-RateLimit-Reset` | The selected rule's reset time as a Unix timestamp in seconds, rounded up. |
+```sh
+curl -i http://127.0.0.1:8000/orders
+curl -i http://127.0.0.1:8000/orders
+```
 
-With several rules, the default formatter picks the rule with the lowest
-fraction of quota remaining. Ties go to the first rule evaluated. Readings
-can change as concurrent requests consume quota. The middleware consumes no
-quota itself.
+| Mode | First response | Second response |
+| --- | --- | --- |
+| Default | `200` with `X-RateLimit-Limit: 2` and `X-RateLimit-Remaining: 0`. | `429` with the default body and `Retry-After`. |
+| Custom | The same `200` headers, plus `X-Quota-Cost: 2` and `X-Quota-Scope: orders`. | `429` with `{"error":"quota_exceeded"}` and `Retry-After`. |
+| Simulated storage failure | `503` with `{"error":"quota_temporarily_unavailable"}`. | The same `503` body. |
 
-Pass `headers_func` to the middleware to format the tuple of
-`RateLimitSnapshot` objects in rule evaluation order. The callback returns a
-mapping of header names to string values.
+To see the default `503` body, rerun the last mode with only
+`SIMULATE_OUTAGE=1`. To use the library's explicit exception handlers, set
+`RESPONSE_MODE=builtin`.

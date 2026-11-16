@@ -2,6 +2,14 @@
 
 Import these names directly from `fastapi_ratelimits`.
 
+| Configuration | Examples |
+| --- | --- |
+| `Limiter(storage_uri=..., storage_options=..., strategy=...)` or `Limiter(storage=..., strategy=...)` | [Storage sources and strategies](storage.md) |
+| `Limiter(key_func=..., route_id_func=...)` | [Client key and route scope](rules.md#choose-the-client-key-and-route-scope) |
+| `Limiter.lifespan(app)` | [Single and composed lifespans](quickstart.md) |
+| `Limiter.limit(value, key_func=..., group=..., cost=...)` | [Rule options](rules.md) and [FastAPI dependencies](dependencies.md) |
+| `RateLimitHeadersMiddleware(headers_func=...)`, exceptions, and handlers | [Responses and headers](responses.md) |
+
 ## Limiter
 
 ::: fastapi_ratelimits.Limiter
