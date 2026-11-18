@@ -1,4 +1,5 @@
 import pytest
+from fastapi import FastAPI
 from limits.aio.storage import MemoryStorage
 from support import client_for
 
@@ -6,6 +7,40 @@ from fastapi_ratelimits import Limiter
 
 
 class TestStorageConfiguration:
+    async def test_accepts_redis_client_as_only_storage_source(self) -> None:
+        redis = pytest.importorskip("redis.asyncio")
+        async with redis.Redis() as connection:
+            async with client_for(Limiter(redis_client=connection)):
+                pass
+            with pytest.raises(ValueError, match="exactly one"):
+                Limiter(storage_uri="async+redis://", redis_client=connection)
+            with pytest.raises(ValueError, match="exactly one"):
+                Limiter(storage=MemoryStorage(), redis_client=connection)
+
+    @pytest.mark.parametrize("option", ["connection_pool", "socket_timeout"])
+    def test_rejects_connection_options_with_redis_client(self, *, option: str) -> None:
+        redis = pytest.importorskip("redis.asyncio")
+        with pytest.raises(ValueError, match=rf"{option}.*application's Redis client"):
+            Limiter(redis_client=redis.Redis(), storage_options={option: 1})
+
+    async def test_rejects_incompatible_redis_client(self) -> None:
+        redis = pytest.importorskip("redis")
+        with redis.Redis() as connection:
+            with pytest.raises(TypeError, match="redis.asyncio.Redis"):
+                async with client_for(Limiter(redis_client=connection)):
+                    pytest.fail("A synchronous Redis client must not start")
+
+    async def test_rejects_incompatible_client_from_provider(self) -> None:
+        pytest.importorskip("redis.asyncio")
+
+        def provider(app: FastAPI) -> object:
+            return object()
+
+        limiter = Limiter(redis_client=provider)
+        with pytest.raises(TypeError, match="redis.asyncio.Redis"):
+            async with client_for(limiter):
+                pytest.fail("An invalid Redis client provider must fail during startup")
+
     def test_requires_one_async_storage_source(self) -> None:
         with pytest.raises(ValueError, match="exactly one"):
             Limiter()

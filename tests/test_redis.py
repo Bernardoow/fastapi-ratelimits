@@ -1,7 +1,8 @@
 import asyncio
 import os
 import socket
-from contextlib import AsyncExitStack
+from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack, asynccontextmanager
 from uuid import uuid4
 
 import pytest
@@ -132,6 +133,87 @@ class TestRedis:
             max_wait = 1.05 if strategy == "moving-window" else 2.05
             await asyncio.sleep(max_wait)
             assert (await client.get("/")).status_code == 200
+
+    async def test_redis_client_shares_pool_without_closing_it(self, *, redis_uri: str) -> None:
+        redis = pytest.importorskip("redis.asyncio")
+        prefix = f"fastapi-ratelimits-test-{uuid4().hex}"
+        async with redis.Redis.from_url(redis_uri, max_connections=1) as connection:
+            limiter = Limiter(redis_client=connection, storage_options={"key_prefix": prefix})
+            connection_id = await connection.client_id()
+            async with client_for(limiter) as client:
+                async with connection.client() as reserved:
+                    assert await reserved.client_id() == connection_id
+                    assert (await client.get("/")).status_code == 503
+                assert [(await client.get("/")).status_code for _ in range(3)] == [200, 200, 429]
+            assert await connection.client_id() == connection_id
+            async with client_for(limiter) as client:
+                assert (await client.get("/")).status_code == 429
+
+    async def test_redis_client_prefix_isolates_quota(self, *, redis_uri: str) -> None:
+        redis = pytest.importorskip("redis.asyncio")
+        prefix = f"fastapi-ratelimits-test-{uuid4().hex}"
+
+        async def key() -> str:
+            return prefix
+
+        async with redis.Redis.from_url(redis_uri) as connection:
+            default = Limiter(redis_client=connection, key_func=key)
+            custom = Limiter(
+                redis_client=connection,
+                key_func=key,
+                storage_options={"key_prefix": prefix},
+            )
+            async with client_for(default) as first:
+                assert [(await first.get("/")).status_code for _ in range(3)] == [200, 200, 429]
+            async with client_for(custom) as second:
+                assert (await second.get("/")).status_code == 200
+            assert len(await connection.keys(f"LIMITS:*{prefix}*")) == 1
+            assert len(await connection.keys(f"{prefix}:*")) == 1
+
+    async def test_resolves_redis_client_once_per_lifespan(self, *, redis_uri: str) -> None:
+        redis = pytest.importorskip("redis.asyncio")
+        prefix = f"fastapi-ratelimits-test-{uuid4().hex}"
+        resolved_for: list[FastAPI] = []
+
+        def provider(app: FastAPI) -> redis.Redis:
+            resolved_for.append(app)
+            return app.state.redis
+
+        limiter = Limiter(redis_client=provider, storage_options={"key_prefix": prefix})
+
+        @asynccontextmanager
+        async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+            async with redis.Redis.from_url(redis_uri, max_connections=1) as connection:
+                app.state.redis = connection
+                async with limiter.lifespan(app):
+                    yield
+
+        async def endpoint() -> str:
+            return "ok"
+
+        first = FastAPI(lifespan=lifespan)
+        second = FastAPI(lifespan=lifespan)
+        for app in (first, second):
+            app.get("/", dependencies=[Depends(limiter.limit("2/minute"))])(endpoint)
+        assert resolved_for == []
+
+        async with (
+            LifespanManager(first),
+            LifespanManager(second),
+            AsyncClient(transport=ASGITransport(app=first), base_url="http://test") as first_http,
+            AsyncClient(
+                transport=ASGITransport(app=second), base_url="http://test"
+            ) as second_http,
+        ):
+            async with first.state.redis.client():
+                assert (await first_http.get("/")).status_code == 503
+                assert (await second_http.get("/")).status_code == 200
+            assert (await first_http.get("/")).status_code == 200
+            assert (await second_http.get("/")).status_code == 429
+            assert resolved_for == [first, second]
+
+        async with LifespanManager(first):
+            assert resolved_for == [first, second, first]
 
     async def test_different_strategies_do_not_share_counters(self, *, redis_uri: str) -> None:
         pytest.importorskip("redis.asyncio")

@@ -1,8 +1,9 @@
 # Storage and strategies
 
-Pass exactly one of `storage_uri` and `storage` to `Limiter`. With a URI,
-the limiter owns the storage and manages it through its lifespan. With
-`storage=...`, the application owns the instance and its cleanup.
+Choose one storage source for `Limiter`. With `storage_uri`, the limiter
+creates and closes its own storage. Use `redis_client` to share the connection
+pool of your application's async Redis client, or `storage` to supply a
+configured async storage instance. The application manages resources it supplies.
 
 ## Try memory, Redis, and all three strategies
 
@@ -74,8 +75,7 @@ applications, `socket_connect_timeout` to bound connection setup, and
 `LIMITS`. You can also set `storage_options={"wrap_exceptions": True}` to
 enable upstream error wrapping, or specify `"implementation": "redispy"`,
 which is already the default for this URI API. For a different Redis client
-implementation or an existing connection pool, pass a storage instance
-instead.
+implementation, pass a storage instance.
 
 See [async Redis storage in limits](https://limits.readthedocs.io/en/stable/api.html#limits.aio.storage.RedisStorage)
 for the backend options and
@@ -119,6 +119,60 @@ For different strategies in one app, create separate limiters and
 separate their counters, even in the same storage with the same prefix.
 See [how the strategies count](https://limits.readthedocs.io/en/stable/strategies.html)
 for timing examples.
+
+## Share your application's Redis client
+
+If your app already has a `redis.asyncio.Redis` instance named `client`,
+pass it directly to the limiter. The limiter uses the client's existing
+pool. The application closes the client and its pool after the limiter exits.
+
+```python
+from fastapi_ratelimits import Limiter
+
+limiter = Limiter(redis_client=client, storage_options={"key_prefix": "orders"})
+```
+
+The default key prefix is `LIMITS`. Set `key_prefix` to isolate quotas for
+apps sharing a database. Configure connection settings such as
+`socket_timeout` when creating the client or pool. Passing connection
+settings in `storage_options` with `redis_client` raises a configuration error.
+
+### Create the Redis client at startup
+
+If you declare routes before creating the client, pass a synchronous
+function that returns the application's client. The limiter calls it once
+on each entry to `limiter.lifespan(app)`. This example sets `app.state.redis`
+before entering the limiter's lifespan. The outer context closes the Redis
+client and its pool after the limiter exits.
+
+```python title="app.py"
+import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI
+from redis.asyncio import Redis
+
+from fastapi_ratelimits import Limiter
+
+limiter = Limiter(redis_client=lambda app: app.state.redis)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    async with Redis.from_url(os.environ["REDIS_URL"], socket_timeout=0.5) as client:
+        app.state.redis = client
+        async with limiter.lifespan(app):
+            yield
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+@app.get("/orders", dependencies=[Depends(limiter.limit("2/minute"))])
+async def orders() -> list[str]:
+    return []
+```
 
 ## Supply storage your application owns
 
