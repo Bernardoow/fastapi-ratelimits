@@ -14,6 +14,7 @@ nav = [
   { "Storage and strategies" = "storage.md" },
   { "Responses and headers" = "responses.md" },
   { "API reference" = "reference.md" },
+  { "Development" = "development.md" },
 ]
 
 [project.theme]
