@@ -1,53 +1,39 @@
 # fastapi-ratelimits
 
-Asynchronous rate limiting for HTTP APIs built with FastAPI. Define limits as
-FastAPI dependencies and share counters across workers with Redis. Requires
-Python 3.11 or newer.
-
-[English documentation](https://bernardoow.github.io/fastapi-ratelimits/)
-· [Documentação em português](https://bernardoow.github.io/fastapi-ratelimits/pt-br/)
-
-Install the package with `pip install fastapi-ratelimits`. For Redis, use
-`pip install 'fastapi-ratelimits[redis]'`.
+Apply rate limits with FastAPI’s `Depends` and reuse your app’s dependencies
+to decide who gets which quota.
 
 ```python
-from fastapi import Depends, FastAPI
+from typing import Annotated
+
+from fastapi import Depends, FastAPI, Header
 
 from fastapi_ratelimits import Limiter
 
-limiter = Limiter(storage_uri="async+memory://")
+
+async def get_account(x_account: Annotated[str, Header(min_length=1)]) -> str:
+    return x_account
+
+
+async def order_quota(account: Annotated[str, Depends(get_account)]) -> str:
+    return "10/minute" if account == "demo-pro" else "2/minute"
+
+
+limiter = Limiter(storage_uri="async+memory://", key_func=get_account)
 app = FastAPI(lifespan=limiter.lifespan)
 
 
-@app.get("/orders", dependencies=[Depends(limiter.limit("2/minute"))])
-async def orders():
-    return {"orders": []}
+@app.get("/orders", dependencies=[Depends(limiter.limit(order_quota))])
+async def orders() -> list[str]:
+    return []
 ```
 
-In this single-process example, each client IP gets two requests per minute to `GET /orders`. The
-[Quickstart](https://bernardoow.github.io/fastapi-ratelimits/quickstart/) shows
-how to run the app and see the `429` response.
+With `X-Account: demo-basic`, `GET /orders` allows two requests per minute.
+With `X-Account: demo-pro`, it allows ten. Each account has its own quota.
+In your app, use your authentication dependency in place of the demo header.
 
-## Development
+Install with `pip install fastapi-ratelimits` on Python 3.11 or newer.
+See the [documentation](https://bernardoow.github.io/fastapi-ratelimits/)
+for setup, Redis, and more examples.
 
-```sh
-uv sync --python 3.11 --extra redis
-uv run --python 3.11 pytest -m 'not redis'
-uv run --python 3.11 mypy
-uv run --python 3.11 ruff check .
-```
-
-For Redis integration tests, use a disposable local server. Set
-`RATELIMITS_TEST_REDIS_URL` to a client URI without the `async+` prefix.
-
-```sh
-RATELIMITS_TEST_REDIS_URL=redis://127.0.0.1:6379/0 uv run --python 3.11 --extra redis pytest
-```
-
-Build both documentation editions in this order. The Portuguese build writes
-to `site/pt-br/` under the English build's output.
-
-```sh
-uv run --locked --no-dev --group docs zensical build --clean --strict
-uv run --locked --no-dev --group docs zensical build --clean --strict --config-file zensical.pt-br.toml
-```
+To work on the library, read the [Development guide](https://bernardoow.github.io/fastapi-ratelimits/development/).
