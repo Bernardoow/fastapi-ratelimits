@@ -121,15 +121,22 @@ class Limiter:
         key_func: ValueProvider[str] | None = None,
         group: str | None = None,
         cost: int | ValueProvider[int] = 1,
+        skip_if: bool | ValueProvider[bool] = False,
     ) -> Callable[..., Coroutine[Any, Any, None]]:
-        """Build one rule for Depends, scoped to the route or an explicit group."""
+        """Build one rule for Depends, scoped to the route or an explicit group.
+
+        A true `skip_if` skips quota evaluation after FastAPI resolves the rule's
+        dependencies. A callable `skip_if` must provide a boolean.
+        """
         static_item = None if callable(value) else _parse_rule(value)
         if not callable(cost):
             _validate_cost(cost)
         if group is not None and (not isinstance(group, str) or not group):
             raise ValueError("group must be a nonempty string")
+        if not callable(skip_if) and not isinstance(skip_if, bool):
+            raise ValueError("skip_if must be a bool or a callable")
 
-        for provider in (key_func, value, cost):
+        for provider in (key_func, value, cost, skip_if):
             if callable(provider):
                 warn_if_sync(provider)
         key_dependency = self._key_func if key_func is None else key_func
@@ -138,6 +145,7 @@ class Limiter:
         )
         value_dependency: ValueProvider[str] = _resolve_through_fastapi(value)
         cost_dependency: ValueProvider[int] = _resolve_through_fastapi(cost)
+        skip_dependency: ValueProvider[bool] = _resolve_through_fastapi(skip_if)
         scope_type = "route" if group is None else "group"
 
         async def check(
@@ -147,7 +155,12 @@ class Limiter:
             scope: str = Depends(scope_dependency),
             resolved_limit: str = Depends(value_dependency),
             resolved_cost: int = Depends(cost_dependency),
+            should_skip: bool = Depends(skip_dependency),
         ) -> None:
+            if not isinstance(should_skip, bool):
+                raise ValueError("skip_if provider must return a bool")
+            if should_skip:
+                return
             if not isinstance(key, str) or not key:
                 raise ValueError("key_func must return a nonempty string")
             if not isinstance(scope, str) or not scope:

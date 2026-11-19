@@ -8,7 +8,7 @@ Import these names directly from `fastapi_ratelimits`.
 | `Limiter(redis_client=..., storage_options=...)` | [Use an existing Redis client or obtain one at startup](storage.md#share-your-applications-redis-client) |
 | `Limiter(key_func=..., route_id_func=...)` | [Client key and route scope](rules.md#choose-the-client-key-and-route-scope) |
 | `Limiter.lifespan(app)` | [Single and composed lifespans](quickstart.md) |
-| `Limiter.limit(value, key_func=..., group=..., cost=...)` | [Rule options](rules.md) and [FastAPI dependencies](dependencies.md) |
+| `Limiter.limit(value, key_func=..., group=..., cost=..., skip_if=...)` | [Rule options](rules.md) and [FastAPI dependencies](dependencies.md) |
 | `RateLimitHeadersMiddleware(headers_func=...)`, exceptions, and handlers | [Responses and headers](responses.md) |
 
 ## Limiter

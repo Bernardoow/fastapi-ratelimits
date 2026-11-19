@@ -5,10 +5,106 @@ from asgi_lifespan import LifespanManager
 from fastapi import Depends, FastAPI, Header
 from httpx import ASGITransport, AsyncClient
 
-from fastapi_ratelimits import Limiter
+from fastapi_ratelimits import Limiter, RateLimitHeadersMiddleware
 
 
 class TestRules:
+    async def test_skip_if_uses_fastapi_dependencies_and_only_skips_its_rule(self) -> None:
+        calls: list[str] = []
+
+        async def contract(x_contract: Annotated[str, Header()]) -> str:
+            calls.append(x_contract)
+            return x_contract
+
+        async def is_exempt(current: Annotated[str, Depends(contract)]) -> bool:
+            return current == "exempt"
+
+        limiter = Limiter(storage_uri="async+memory://")
+        app = FastAPI(lifespan=limiter.lifespan)
+        app.add_middleware(RateLimitHeadersMiddleware)
+        conditional = Depends(limiter.limit("1/hour", group="contract", skip_if=is_exempt))
+        operation = Depends(limiter.limit("2/hour", group="operation"))
+
+        @app.get("/combined", dependencies=[conditional, operation])
+        @app.get("/contract", dependencies=[conditional])
+        async def endpoint(current: Annotated[str, Depends(contract)]) -> str:
+            return current
+
+        async with (
+            LifespanManager(app),
+            AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+        ):
+            headers = {"x-contract": "exempt"}
+            response = await client.get("/combined", headers=headers)
+            assert response.status_code == 200
+            assert response.headers["X-RateLimit-Limit"] == "2"
+            assert calls == ["exempt"]
+            assert (await client.get("/combined", headers=headers)).status_code == 200
+            assert (await client.get("/combined", headers=headers)).status_code == 429
+
+            response = await client.get("/contract", headers=headers)
+            assert response.status_code == 200
+            assert "X-RateLimit-Limit" not in response.headers
+
+            async def metered_contract() -> str:
+                return "metered"
+
+            app.dependency_overrides[contract] = metered_contract
+            assert (await client.get("/contract")).status_code == 200
+            assert (await client.get("/contract")).status_code == 429
+
+    @pytest.mark.parametrize("result", ["false", 1, None])
+    async def test_skip_if_provider_must_return_a_bool(self, *, result: object) -> None:
+        async def condition() -> object:
+            return result
+
+        limiter = Limiter(storage_uri="async+memory://")
+        app = FastAPI(lifespan=limiter.lifespan)
+
+        @app.get("/", dependencies=[Depends(limiter.limit("1/hour", skip_if=condition))])
+        async def endpoint() -> str:
+            return "ok"
+
+        async with (
+            LifespanManager(app),
+            AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+        ):
+            with pytest.raises(ValueError, match="skip_if provider must return a bool"):
+                await client.get("/")
+
+    def test_rejects_invalid_static_skip_if(self) -> None:
+        limiter = Limiter(storage_uri="async+memory://")
+        with pytest.raises(ValueError, match="skip_if must be a bool or a callable"):
+            limiter.limit("1/hour", skip_if="false")
+
+    def test_rejects_invalid_static_cost_even_when_skipped(self) -> None:
+        limiter = Limiter(storage_uri="async+memory://")
+        with pytest.raises(ValueError, match="positive integer"):
+            limiter.limit("1/hour", cost=0, skip_if=True)
+
+    async def test_static_skip_if_keeps_provider_input_validation(self) -> None:
+        async def cost(x_items: Annotated[int, Header()]) -> int:
+            return x_items
+
+        limiter = Limiter(storage_uri="async+memory://")
+        app = FastAPI(lifespan=limiter.lifespan)
+
+        skipped = Depends(limiter.limit("1/hour", cost=cost, skip_if=True))
+
+        @app.get("/skipped", dependencies=[skipped])
+        @app.get("/metered", dependencies=[Depends(limiter.limit("1/hour", skip_if=False))])
+        async def endpoint() -> str:
+            return "ok"
+
+        async with (
+            LifespanManager(app),
+            AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+        ):
+            assert (await client.get("/skipped")).status_code == 422
+            assert (await client.get("/skipped", headers={"x-items": "0"})).status_code == 200
+            assert (await client.get("/metered")).status_code == 200
+            assert (await client.get("/metered")).status_code == 429
+
     async def test_shared_scope_and_first_refusal_preserve_prior_consumption(self) -> None:
         limiter = Limiter(storage_uri="async+memory://")
         app = FastAPI(lifespan=limiter.lifespan)
