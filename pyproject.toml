@@ -1,6 +1,6 @@
 [project]
 name = "fastapi-ratelimits"
-version = "0.2.1"
+version = "0.2.0"
 description = "Async rate limiting for FastAPI dependencies, powered by limits"
 readme = "README.md"
 license = "MIT"
