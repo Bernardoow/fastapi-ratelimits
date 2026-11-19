@@ -149,6 +149,33 @@ O FastAPI reaproveita seu resultado por padrão dentro da mesma requisição.
 Em testes, você pode substituí-la por uma função assíncrona com
 `app.dependency_overrides[account]`.
 
+## Pule uma regra condicionalmente
+
+Passe em `skip_if` um booleano ou uma dependência do FastAPI que retorne um
+booleano. O padrão é `False`. Quando o valor é `True`, o limiter pula o consumo
+de cota e a consulta de estatísticas daquela regra. A regra fica fora dos
+cabeçalhos de cota, e as demais regras da operação continuam valendo.
+
+No exemplo anterior, substitua a definição de `pdf_budget` para isentar uma
+conta da cota compartilhada nas requisições de PDF. A cota por rota continua
+valendo.
+
+```python
+async def skip_pdf_budget(user: Annotated[str, Depends(account)]) -> bool:
+    return user == "demo-partner"
+
+
+pdf_budget = Depends(
+    limiter.limit(export_quota, group="exports", cost=pdf_cost, skip_if=skip_pdf_budget)
+)
+```
+
+O FastAPI ainda resolve as dependências da regra, então um parâmetro de query
+`pages` inválido pode gerar um `422` para uma conta isenta. Ao pular a regra, o
+limiter ignora os valores de chave, escopo, cota e custo já resolvidos. Ele
+valida os valores fixos na chamada a `limit(...)`. Um retorno do callback que
+não seja booleano gera `ValueError`.
+
 ## Use um callback síncrono existente
 
 O FastAPI executa callbacks declarados com `def` em uma thread de trabalho.

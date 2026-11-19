@@ -145,6 +145,32 @@ FastAPI resolves the providers and their sub-dependencies. Here, the nested
 whose result FastAPI reuses by default within one request. In tests you can
 replace it with an async provider using `app.dependency_overrides[account]`.
 
+## Skip a rule conditionally
+
+Set `skip_if` to a boolean or a FastAPI dependency that returns a boolean.
+The default is `False`. When the value is `True`, the limiter skips quota
+consumption and the statistics lookup for that rule. The rule contributes no
+quota headers, and the operation's other rules still apply.
+
+In the previous example, replace the `pdf_budget` definition to exempt an
+account from the shared quota on PDF requests. The per-route quota still applies.
+
+```python
+async def skip_pdf_budget(user: Annotated[str, Depends(account)]) -> bool:
+    return user == "demo-partner"
+
+
+pdf_budget = Depends(
+    limiter.limit(export_quota, group="exports", cost=pdf_cost, skip_if=skip_pdf_budget)
+)
+```
+
+FastAPI still resolves the rule's dependencies, so an invalid `pages` query
+parameter can return `422` for an exempt account. Once the rule is skipped, the
+limiter ignores the resolved key, scope, quota, and cost. It validates fixed
+values when you call `limit(...)`. A callback that returns a non-boolean value
+raises `ValueError`.
+
 ## Use an existing synchronous callback
 
 FastAPI runs regular `def` callbacks in a worker thread. Configuring one
