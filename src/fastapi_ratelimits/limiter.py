@@ -13,7 +13,7 @@ from .callbacks import warn_if_sync
 from .defaults import default_route_id, key_by_ip
 from .exceptions import RateLimitExceeded, StorageUnavailable
 from .headers import RateLimitSnapshot, request_snapshots
-from .storage import open_storage
+from .storage import Redis, open_storage, storage_from_redis_client, validate_redis_client_options
 
 T = TypeVar("T")
 ValueProvider = Callable[..., T | Awaitable[T] | Iterator[T] | AsyncIterator[T]]
@@ -56,24 +56,28 @@ class Limiter:
         *,
         storage_uri: str | None = None,
         storage: Storage | None = None,
+        redis_client: Redis | Callable[[FastAPI], Redis] | None = None,
         storage_options: Mapping[str, Any] | None = None,
         strategy: str = "fixed-window",
         key_func: ValueProvider[str] = key_by_ip,
         route_id_func: ValueProvider[str] = default_route_id,
     ) -> None:
-        if (storage_uri is None) == (storage is None):
-            raise ValueError("Configure exactly one of storage_uri or storage")
+        if sum(source is not None for source in (storage_uri, storage, redis_client)) != 1:
+            raise ValueError("Configure exactly one of storage_uri, storage or redis_client")
         if storage_uri is not None and not storage_uri.startswith("async+"):
             raise ValueError("storage_uri must select an async+ storage")
         if storage is not None and not isinstance(storage, Storage):
             raise TypeError("storage must be an asynchronous limits storage")
         if storage is not None and storage_options is not None:
-            raise ValueError("Configure storage_options only with storage_uri")
+            raise ValueError("Configure storage_options only with storage_uri or redis_client")
         if strategy not in _STRATEGIES:
             raise ValueError(f"Unknown rate limit strategy: {strategy!r}")
         self._storage_uri = storage_uri
         self._storage = storage
+        self._redis_client = redis_client
         self._storage_options = dict(storage_options or {})
+        if redis_client is not None:
+            validate_redis_client_options(options=self._storage_options)
         self._strategy_name = strategy
         warn_if_sync(key_func)
         warn_if_sync(route_id_func)
@@ -88,11 +92,15 @@ class Limiter:
             raise RuntimeError("Limiter.lifespan is already active for this application")
         async with AsyncExitStack() as stack:
             storage = self._storage
-            if storage is None:
-                assert self._storage_uri is not None
+            if self._redis_client is not None:
+                storage = storage_from_redis_client(
+                    source=self._redis_client, app=app, options=self._storage_options
+                )
+            elif self._storage_uri is not None:
                 storage = await stack.enter_async_context(
                     open_storage(uri=self._storage_uri, options=self._storage_options)
                 )
+            assert storage is not None
             if any(
                 not callable(getattr(storage, method, None))
                 for method in _STRATEGY_METHODS.get(self._strategy_name, ())

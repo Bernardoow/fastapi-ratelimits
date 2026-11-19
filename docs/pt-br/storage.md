@@ -1,8 +1,9 @@
 # Storage e estratégias
 
-Passe exatamente uma opção entre `storage_uri` e `storage` para `Limiter`.
-Com URI, o limiter é dono do storage e o gerencia pelo lifespan. Com
-`storage=...`, a aplicação é responsável pela instância e pelo seu encerramento.
+Escolha uma origem de storage para o `Limiter`. Com `storage_uri`, o limiter
+cria e encerra seu próprio storage. Use `redis_client` para compartilhar o
+pool do cliente Redis assíncrono da aplicação ou `storage` para fornecer um
+storage assíncrono já configurado. A aplicação gerencia os recursos que fornece.
 
 ## Experimente memória, Redis e as três estratégias
 
@@ -73,8 +74,8 @@ O exemplo usa `key_prefix` para separar as chaves Redis da aplicação,
 para limitar o tempo das operações no socket. O prefixo padrão é `LIMITS`.
 Você também pode usar `storage_options={"wrap_exceptions": True}` para que o
 backend encapsule erros ou declarar `"implementation": "redispy"`, que já é o
-padrão da API por URI. Para outra implementação de cliente Redis ou um pool
-de conexões existente, passe uma instância de storage.
+padrão da API por URI. Para outra implementação de cliente Redis, passe uma
+instância de storage.
 
 Consulte o [storage Redis assíncrono no limits](https://limits.readthedocs.io/en/stable/api.html#limits.aio.storage.RedisStorage)
 para ver as opções do backend e as
@@ -117,6 +118,60 @@ e [entre no lifespan de cada um](quickstart.md#use-um-lifespan-existente).
 O nome da estratégia separa os contadores, mesmo quando usam o mesmo storage
 e prefixo. Veja [como as estratégias contam](https://limits.readthedocs.io/en/stable/strategies.html)
 para exemplos ao longo do tempo.
+
+## Compartilhe o cliente Redis da aplicação
+
+Se a aplicação já tem uma instância de `redis.asyncio.Redis` chamada `client`,
+passe-a diretamente ao limiter. O limiter usa o pool de conexões desse
+cliente. A aplicação fecha o cliente e seu pool depois de encerrar o limiter.
+
+```python
+from fastapi_ratelimits import Limiter
+
+limiter = Limiter(redis_client=client, storage_options={"key_prefix": "orders"})
+```
+
+O prefixo padrão das chaves é `LIMITS`. Use `key_prefix` para isolar as cotas
+de aplicações que compartilham o banco. Configure opções de conexão como
+`socket_timeout` ao criar o cliente ou o pool. Passar opções de conexão
+em `storage_options` junto com `redis_client` gera um erro de configuração.
+
+### Crie o cliente Redis no startup
+
+Se as rotas são declaradas antes da criação do cliente, forneça uma função
+síncrona que devolve o cliente da aplicação. O limiter chama a função uma vez
+a cada entrada em `limiter.lifespan(app)`. O exemplo define `app.state.redis`
+antes de entrar no lifespan do limiter. O contexto externo fecha o cliente
+Redis e seu pool depois que o limiter encerra.
+
+```python title="app.py"
+import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI
+from redis.asyncio import Redis
+
+from fastapi_ratelimits import Limiter
+
+limiter = Limiter(redis_client=lambda app: app.state.redis)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    async with Redis.from_url(os.environ["REDIS_URL"], socket_timeout=0.5) as client:
+        app.state.redis = client
+        async with limiter.lifespan(app):
+            yield
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+@app.get("/orders", dependencies=[Depends(limiter.limit("2/minute"))])
+async def orders() -> list[str]:
+    return []
+```
 
 ## Forneça um storage gerenciado pela aplicação
 
