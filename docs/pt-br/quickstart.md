@@ -5,7 +5,8 @@ Este exemplo usa storage em memória e roda em um único processo.
 
 ## Instale a partir do repositório
 
-Use um ambiente virtual ativo com Python 3.11 ou superior.
+Use um ambiente virtual ativo com Python 3.11 ou superior. Se você já tem uma
+aplicação FastAPI, confira os [requisitos das dependências](compatibility.md).
 
 ```sh
 git clone https://github.com/Bernardoow/fastapi-ratelimits.git

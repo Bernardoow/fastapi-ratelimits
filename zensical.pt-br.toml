@@ -8,6 +8,7 @@ site_dir = "site/pt-br"
 nav = [
   { "Início" = "index.md" },
   { "Início rápido" = "quickstart.md" },
+  { "Compatibilidade" = "compatibility.md" },
   { "Dependências do FastAPI" = "dependencies.md" },
   { "Regras e identidade" = "rules.md" },
   { "Storage e estratégias" = "storage.md" },

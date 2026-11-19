@@ -8,6 +8,7 @@ site_dir = "site"
 nav = [
   { "Home" = "index.md" },
   { "Quickstart" = "quickstart.md" },
+  { "Compatibility" = "compatibility.md" },
   { "FastAPI dependencies" = "dependencies.md" },
   { "Rules and identity" = "rules.md" },
   { "Storage and strategies" = "storage.md" },

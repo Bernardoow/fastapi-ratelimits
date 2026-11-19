@@ -5,7 +5,8 @@ in-memory storage and runs in one process.
 
 ## Install from the repository
 
-Use an active Python 3.11 or newer virtual environment.
+Use an active Python 3.11 or newer virtual environment. If you already have a
+FastAPI app, check the [dependency requirements](compatibility.md).
 
 ```sh
 git clone https://github.com/Bernardoow/fastapi-ratelimits.git

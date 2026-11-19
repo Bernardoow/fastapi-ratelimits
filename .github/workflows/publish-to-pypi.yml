@@ -7,20 +7,16 @@ on:
 permissions: {}
 
 jobs:
+  test:
+    uses: ./.github/workflows/tests.yml
+    permissions:
+      contents: read
+
   build:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    services:
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379/tcp
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
     steps:
       - name: Check out the release
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -39,16 +35,6 @@ jobs:
             echo "Expected tag v$version for this package version, got $GITHUB_REF_NAME."
             exit 1
           fi
-      - name: Install test dependencies
-        run: uv sync --locked --extra redis
-      - name: Run tests with Redis
-        env:
-          RATELIMITS_TEST_REDIS_URL: redis://127.0.0.1:${{ job.services.redis.ports[6379] }}/0
-        run: uv run --no-sync pytest
-      - name: Check types and lint
-        run: |
-          uv run --no-sync mypy
-          uv run --no-sync ruff check .
       - name: Build the wheel and source distribution
         run: uv build --no-sources
       - name: Install and import the wheel in a clean environment
