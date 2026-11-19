@@ -9,7 +9,7 @@ authors = [
     { name = "Bernardo Gomes" }
 ]
 requires-python = ">=3.11"
-dependencies = ["fastapi>=0.163.1,<1", "limits>=5.8,<6"]
+dependencies = ["fastapi>=0.95.1", "limits>=5.8,<6"]
 
 [project.urls]
 Repository = "https://github.com/Bernardoow/fastapi-ratelimits"

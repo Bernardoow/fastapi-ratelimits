@@ -5,13 +5,34 @@ from typing import Annotated
 
 import pytest
 from asgi_lifespan import LifespanManager
-from fastapi import Depends, FastAPI, Header, Request
+from fastapi import APIRouter, Depends, FastAPI, Header, Request
 from httpx import ASGITransport, AsyncClient
 
 from fastapi_ratelimits import Limiter
 
 
 class TestKeyDependencies:
+    async def test_annotated_key_with_default_on_included_router(self) -> None:
+        async def key(x_user: Annotated[str, Header()] = "anonymous") -> str:
+            return x_user
+
+        limiter = Limiter(storage_uri="async+memory://", key_func=key)
+        router = APIRouter()
+
+        @router.get("/items", dependencies=[Depends(limiter.limit("1/minute"))])
+        async def items() -> str:
+            return "ok"
+
+        app = FastAPI(lifespan=limiter.lifespan)
+        app.include_router(router, prefix="/api")
+        async with (
+            LifespanManager(app),
+            AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+        ):
+            assert (await client.get("/api/items")).status_code == 200
+            assert (await client.get("/api/items")).status_code == 429
+            assert (await client.get("/api/items", headers={"x-user": "alice"})).status_code == 200
+
     async def test_native_cache_overrides_and_per_rule_keys(self) -> None:
         calls: list[str] = []
 

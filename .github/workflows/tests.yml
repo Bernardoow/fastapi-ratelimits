@@ -1,0 +1,62 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }} / ${{ matrix.dependencies }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
+        dependencies: [locked, minimum, latest]
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379/tcp
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.13.9"
+          python-version: ${{ matrix.python-version }}
+          enable-cache: false
+      - name: Install locked dependencies
+        if: matrix.dependencies != 'latest'
+        run: uv sync --locked --extra redis
+      - name: Install minimum runtime dependencies
+        if: matrix.dependencies == 'minimum'
+        run: >-
+          uv pip install --python .venv/bin/python
+          --upgrade --resolution lowest-direct --extra redis -r pyproject.toml
+      - name: Install latest compatible dependencies
+        if: matrix.dependencies == 'latest'
+        run: uv sync --extra redis --upgrade
+      - name: Run tests with Redis
+        env:
+          RATELIMITS_TEST_REDIS_URL: redis://127.0.0.1:${{ job.services.redis.ports['6379'] }}/0
+        run: uv run --no-sync pytest
+      - name: Check types and lint
+        if: matrix.python-version == '3.11' && matrix.dependencies == 'locked'
+        run: |
+          uv run --no-sync mypy
+          uv run --no-sync ruff check .
