@@ -6,7 +6,7 @@ With Git, Make, and `uv` available, run `make setup` from the repository root.
 It prepares the Python 3.11 environment with the development dependencies and
 Redis client from `uv.lock`, then installs the Git hooks for the clone.
 
-The hooks check the staged project metadata and lockfile before commits and
+The hooks check the working-tree project metadata and lockfile before commits and
 automatic merge commits. If the lockfile is out of date, run `uv lock`, stage
 the updated `uv.lock` with the relevant `pyproject.toml` changes, and retry the
 commit.
