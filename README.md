@@ -31,6 +31,8 @@ async def orders() -> list[str]:
 With `X-Account: demo-basic`, `GET /orders` allows two requests per minute.
 With `X-Account: demo-pro`, it allows ten. Each account has its own quota.
 In your app, use your authentication dependency in place of the demo header.
+Create a separate `Limiter` for each FastAPI application. The same app can
+restart its limiter's lifespan.
 
 Install with `pip install fastapi-ratelimits` on Python 3.11 or newer.
 See the [documentation](https://bernardoow.github.io/fastapi-ratelimits/)

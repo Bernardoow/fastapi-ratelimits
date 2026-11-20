@@ -71,6 +71,28 @@ class TestStorageConfiguration:
             assert (await client.get("/")).status_code == 503
 
 
+class TestLimiterLifespan:
+    async def test_only_the_bound_application_can_start_or_restart_lifespan(self) -> None:
+        limiter = Limiter(storage_uri="async+memory://")
+        first = FastAPI(lifespan=limiter.lifespan)
+        second = FastAPI(lifespan=limiter.lifespan)
+
+        async with LifespanManager(first):
+            with pytest.raises(RuntimeError, match="already active for this application"):
+                async with limiter.lifespan(first):
+                    pytest.fail("The same application started an overlapping lifespan")
+            with pytest.raises(RuntimeError, match="already bound to another FastAPI application"):
+                async with LifespanManager(second):
+                    pytest.fail("Another application reused the limiter while it was active")
+            assert await limiter.check_storage() is True
+
+        with pytest.raises(RuntimeError, match="already bound to another FastAPI application"):
+            async with LifespanManager(second):
+                pytest.fail("Another application reused the limiter after shutdown")
+        async with LifespanManager(first):
+            assert await limiter.check_storage() is True
+
+
 class TestStorageReadiness:
     async def test_checks_active_storage_on_demand(
         self, *, monkeypatch: pytest.MonkeyPatch
@@ -83,18 +105,16 @@ class TestStorageReadiness:
         app = FastAPI(lifespan=limiter.lifespan)
 
         with pytest.raises(RuntimeError, match="Limiter.lifespan"):
-            await limiter.check_storage(app)
+            await limiter.check_storage()
         async with LifespanManager(app):
             check.assert_not_awaited()
-            with pytest.raises(RuntimeError, match="Limiter.lifespan"):
-                await limiter.check_storage(FastAPI())
-            assert await limiter.check_storage(app) is False
-            assert await limiter.check_storage(app) is True
+            assert await limiter.check_storage() is False
+            assert await limiter.check_storage() is True
             with pytest.raises(ConnectionError) as error:
-                await limiter.check_storage(app)
+                await limiter.check_storage()
             assert error.value is failure
         with pytest.raises(RuntimeError, match="Limiter.lifespan"):
-            await limiter.check_storage(app)
+            await limiter.check_storage()
         assert check.await_count == 3
 
     @pytest.mark.parametrize(
@@ -106,7 +126,7 @@ class TestStorageReadiness:
             (TypeError("Unexpected check error"), TypeError),
         ],
     )
-    async def test_startup_check_failure_releases_app_state(
+    async def test_startup_check_failure_leaves_limiter_bound_and_allows_retry(
         self,
         *,
         monkeypatch: pytest.MonkeyPatch,
@@ -128,7 +148,10 @@ class TestStorageReadiness:
         else:
             assert error.value is outcome
         with pytest.raises(RuntimeError, match="Limiter.lifespan"):
-            await limiter.check_storage(app)
+            await limiter.check_storage()
+        with pytest.raises(RuntimeError, match="already bound to another FastAPI application"):
+            async with limiter.lifespan(FastAPI()):
+                pytest.fail("Another application reused the limiter after startup failed")
 
         check.assert_awaited_once_with()
         async with LifespanManager(app):

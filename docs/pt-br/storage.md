@@ -89,8 +89,11 @@ um comando de cota pode aplicar a escrita de novo se o Redis o executou e a
 resposta se perdeu.
 
 Para compartilhar uma cota entre workers, acrescente `--workers 2` ao
-comando do Redis. Use o mesmo banco Redis, prefixo de chaves, estratégia e
-configuração de regras em todos os workers.
+comando do Redis. Limiters separados em apps ou workers compartilham
+contadores quando coincidem o banco Redis, o prefixo de chaves, a estratégia,
+o escopo da rota (ou grupo), a chave do cliente, a quantidade da cota e a
+janela (unidade e multiplicador). Veja como as regras selecionam um contador em
+[Regras e identidade](rules.md).
 
 ### Escolha uma estratégia
 
@@ -147,9 +150,9 @@ Importe `StorageStartupError` de `fastapi_ratelimits` para tratar uma falha
 dessa checagem de startup.
 
 Para uma sonda de prontidão ou uma política de startup da aplicação, chame
-`await limiter.check_storage(app)` durante o lifespan ativo do limiter para
-esse app. O método devolve o resultado de `Storage.check()` e propaga exceções
-do backend. Uma chamada sem lifespan ativo para o app lança `RuntimeError`.
+`await limiter.check_storage()` durante o lifespan ativo do limiter. O método
+devolve o resultado de `Storage.check()` e propaga exceções do backend. Uma
+chamada fora do lifespan ativo lança `RuntimeError`.
 
 No Redis, a consulta usa `PING` e preserva os contadores de cota. Um resultado
 positivo confirma que o Redis respondeu naquele instante. A avaliação das

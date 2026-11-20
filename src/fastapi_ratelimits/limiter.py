@@ -17,6 +17,10 @@ from .storage import Redis, open_storage, storage_from_redis_client, validate_re
 
 T = TypeVar("T")
 ValueProvider = Callable[..., T | Awaitable[T] | Iterator[T] | AsyncIterator[T]]
+_APP_MISMATCH_ERROR = (
+    "This Limiter is already bound to another FastAPI application. "
+    "Create a separate Limiter for each application."
+)
 _STRATEGIES: Mapping[str, Callable[[Storage], RateLimiter]] = STRATEGIES
 _STRATEGY_METHODS = {
     "moving-window": ("acquire_entry", "get_moving_window"),
@@ -56,7 +60,7 @@ def _storage_failures(storage: Storage) -> tuple[type[Exception], ...]:
 
 
 class Limiter:
-    """Configure an asynchronous quota strategy and create FastAPI dependencies."""
+    """Configure an asynchronous quota strategy for one FastAPI application."""
 
     def __init__(
         self,
@@ -92,34 +96,42 @@ class Limiter:
         warn_if_sync(route_id_func)
         self._key_func = key_func
         self._route_id_func = route_id_func
-        # TODO: Bind each Limiter to one FastAPI app so storage checks can omit the app argument.
-        self._active: dict[FastAPI, RateLimiter] = {}
+        self._app: FastAPI | None = None
+        self._lifespan_running = False
+        self._active_strategy: RateLimiter | None = None
 
     @asynccontextmanager
     async def lifespan(self, app: FastAPI) -> AsyncIterator[None]:
-        """Start the limiter for an application and release any resources it owns."""
-        if app in self._active:
+        """Bind the limiter to its first app and manage its storage for each run."""
+        if self._app is None:
+            self._app = app
+        elif self._app is not app:
+            raise RuntimeError(_APP_MISMATCH_ERROR)
+        if self._lifespan_running:
             raise RuntimeError("Limiter.lifespan is already active for this application")
-        async with AsyncExitStack() as stack:
-            storage = self._storage
-            if self._redis_client is not None:
-                storage = storage_from_redis_client(
-                    source=self._redis_client, app=app, options=self._storage_options
-                )
-            elif self._storage_uri is not None:
-                storage = await stack.enter_async_context(
-                    open_storage(uri=self._storage_uri, options=self._storage_options)
-                )
-            assert storage is not None
-            if any(
-                not callable(getattr(storage, method, None))
-                for method in _STRATEGY_METHODS.get(self._strategy_name, ())
-            ):
-                raise ValueError(
-                    f"{type(storage).__name__} does not support the {self._strategy_name} strategy"
-                )
-            self._active[app] = _STRATEGIES[self._strategy_name](storage)
-            try:
+
+        self._lifespan_running = True
+        try:
+            async with AsyncExitStack() as stack:
+                storage = self._storage
+                if self._redis_client is not None:
+                    storage = storage_from_redis_client(
+                        source=self._redis_client, app=app, options=self._storage_options
+                    )
+                elif self._storage_uri is not None:
+                    storage = await stack.enter_async_context(
+                        open_storage(uri=self._storage_uri, options=self._storage_options)
+                    )
+                assert storage is not None
+                if any(
+                    not callable(getattr(storage, method, None))
+                    for method in _STRATEGY_METHODS.get(self._strategy_name, ())
+                ):
+                    raise ValueError(
+                        f"{type(storage).__name__} does not support "
+                        f"the {self._strategy_name} strategy"
+                    )
+                strategy = _STRATEGIES[self._strategy_name](storage)
                 if self._check_storage_on_startup:
                     failures = _storage_failures(storage)
                     try:
@@ -128,13 +140,17 @@ class Limiter:
                         raise StorageStartupError() from exc
                     if not healthy:
                         raise StorageStartupError()
-                yield
-            finally:
-                del self._active[app]
+                self._active_strategy = strategy
+                try:
+                    yield
+                finally:
+                    self._active_strategy = None
+        finally:
+            self._lifespan_running = False
 
-    async def check_storage(self, app: FastAPI) -> bool:
-        """Check the active storage for an application and propagate backend errors."""
-        strategy = self._active.get(app)
+    async def check_storage(self) -> bool:
+        """Check the active storage and propagate backend errors."""
+        strategy = self._active_strategy
         if strategy is None:
             raise RuntimeError("Use Limiter.lifespan before checking storage")
         return await strategy.storage.check()
@@ -198,7 +214,9 @@ class Limiter:
                 quote(scope, safe=""),
                 quote(key, safe=""),
             )
-            strategy = self._active.get(request.app)
+            if self._app is not None and request.app is not self._app:
+                raise RuntimeError(_APP_MISMATCH_ERROR)
+            strategy = self._active_strategy
             if strategy is None:
                 raise RuntimeError("Use Limiter.lifespan before serving requests")
             failures = _storage_failures(strategy.storage)
