@@ -1,4 +1,4 @@
-name: Tests
+name: CI
 
 on:
   pull_request:
@@ -9,8 +9,34 @@ on:
 permissions: {}
 
 jobs:
+  code-quality:
+    name: Code quality
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.13.9"
+          python-version: "3.11"
+          enable-cache: false
+      - name: Install locked dependencies
+        run: uv sync --locked --extra redis
+      - name: Run pre-commit
+        run: uv run --no-sync pre-commit run --all-files
+      - name: Check types with mypy
+        run: uv run --no-sync mypy
+      - name: Lint with Ruff
+        run: uv run --no-sync ruff check .
+
   test:
     name: Python ${{ matrix.python-version }} / ${{ matrix.dependencies }}
+    needs: code-quality
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -55,8 +81,3 @@ jobs:
         env:
           RATELIMITS_TEST_REDIS_URL: redis://127.0.0.1:${{ job.services.redis.ports['6379'] }}/0
         run: uv run --no-sync pytest
-      - name: Check types and lint
-        if: matrix.python-version == '3.11' && matrix.dependencies == 'locked'
-        run: |
-          uv run --no-sync mypy
-          uv run --no-sync ruff check .

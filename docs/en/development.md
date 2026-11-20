@@ -1,14 +1,22 @@
 # Development
 
-Run these commands with `uv` from the repository root.
+## Set up a clone
+
+With Git, Make, and `uv` available, run `make setup` from the repository root.
+It prepares the Python 3.11 environment with the development dependencies and
+Redis client from `uv.lock`, then installs the Git hooks for the clone.
+
+The hooks check the working-tree project metadata and lockfile before commits and
+automatic merge commits. If the lockfile is out of date, run `uv lock`, stage
+the updated `uv.lock` with the relevant `pyproject.toml` changes, and retry the
+commit.
 
 ## Run tests and code checks
 
 ```sh
-uv sync --python 3.11 --extra redis
-uv run --python 3.11 pytest -m 'not redis'
-uv run --python 3.11 mypy
-uv run --python 3.11 ruff check .
+uv run --python 3.11 --no-sync pytest -m 'not redis'
+uv run --python 3.11 --no-sync mypy
+uv run --python 3.11 --no-sync ruff check .
 ```
 
 ## Run Redis integration tests
@@ -17,7 +25,7 @@ Use a disposable local Redis server. Set `RATELIMITS_TEST_REDIS_URL` to a
 client URI without the `async+` prefix.
 
 ```sh
-RATELIMITS_TEST_REDIS_URL=redis://127.0.0.1:6379/0 uv run --python 3.11 --extra redis pytest
+RATELIMITS_TEST_REDIS_URL=redis://127.0.0.1:6379/0 uv run --python 3.11 --no-sync pytest
 ```
 
 ## Build the documentation
