@@ -52,6 +52,11 @@ memória.
 
 ## Use um lifespan existente
 
+Crie um `Limiter` separado para cada aplicação FastAPI. A primeira entrada
+no lifespan vincula o limiter ao app. O mesmo app pode entrar novamente após
+o shutdown ou uma falha no startup. Se outro app tentar iniciar o limiter, a
+chamada lança `RuntimeError`.
+
 Entre em `limiter.lifespan(app)` dentro da função de lifespan da aplicação
 antes de ela servir requisições. Se houver mais de um limiter, entre no
 contexto de cada um. O app abaixo usa uma janela fixa em todas as operações e

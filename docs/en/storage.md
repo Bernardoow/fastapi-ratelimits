@@ -88,8 +88,9 @@ of attempts. Retrying `PING` preserves quota counters. Retrying a quota
 command can apply the write again if Redis executed it and the response was lost.
 
 To run multiple workers against one quota, add `--workers 2` to the Redis
-command. All workers should use the same Redis database, key prefix,
-strategy, and rule configuration.
+command. Separate limiters across apps or workers share counters when they
+use the same Redis database, key prefix, strategy, and quota identifiers.
+See [rules and identity](rules.md) for how rules select a counter.
 
 ### Select a strategy
 
@@ -147,10 +148,9 @@ Import `StorageStartupError` from `fastapi_ratelimits` to catch an error from
 this startup check.
 
 For a readiness probe or your own startup policy, call
-`await limiter.check_storage(app)` during that application's active limiter
-lifespan. The method returns the result of `Storage.check()` and propagates
-exceptions from the backend. Calling it without an active limiter lifespan
-for that app raises `RuntimeError`.
+`await limiter.check_storage()` during the limiter's active lifespan. The
+method returns the result of `Storage.check()` and propagates exceptions from
+the backend. Calling it outside an active lifespan raises `RuntimeError`.
 
 On Redis, the check uses `PING` and preserves quota counters. A successful
 check confirms that Redis responded at that moment. Evaluating quota rules

@@ -10,7 +10,7 @@ from asgi_lifespan import LifespanManager
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from httpx import ASGITransport, AsyncClient
-from support import client_for
+from support import app_for, client_for
 
 from fastapi_ratelimits import Limiter, StorageStartupError, StorageUnavailable
 
@@ -125,7 +125,7 @@ class TestRedis:
             AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
         ):
             assert (await client.get("/")).status_code == 200
-            assert await limiter.check_storage(app) is True
+            assert await limiter.check_storage() is True
             assert (await client.get("/")).status_code == 200
             assert (await client.get("/")).status_code == 429
 
@@ -177,15 +177,20 @@ class TestRedis:
         prefix = f"fastapi-ratelimits-test-{uuid4().hex}"
         async with redis.Redis.from_url(redis_uri, max_connections=1) as connection:
             limiter = Limiter(redis_client=connection, storage_options={"key_prefix": prefix})
+            app = app_for(limiter)
             connection_id = await connection.client_id()
-            async with client_for(limiter) as client:
-                async with connection.client() as reserved:
-                    assert await reserved.client_id() == connection_id
-                    assert (await client.get("/")).status_code == 503
-                assert [(await client.get("/")).status_code for _ in range(3)] == [200, 200, 429]
-            assert await connection.client_id() == connection_id
-            async with client_for(limiter) as client:
-                assert (await client.get("/")).status_code == 429
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                async with LifespanManager(app):
+                    async with connection.client() as reserved:
+                        assert await reserved.client_id() == connection_id
+                        assert (await client.get("/")).status_code == 503
+                    statuses = [(await client.get("/")).status_code for _ in range(3)]
+                    assert statuses == [200, 200, 429]
+                assert await connection.client_id() == connection_id
+                async with LifespanManager(app):
+                    assert (await client.get("/")).status_code == 429
 
     async def test_redis_client_prefix_isolates_quota(self, *, redis_uri: str) -> None:
         redis = pytest.importorskip("redis.asyncio")
@@ -217,22 +222,26 @@ class TestRedis:
             resolved_for.append(app)
             return app.state.redis
 
-        limiter = Limiter(redis_client=provider, storage_options={"key_prefix": prefix})
+        def make_app() -> tuple[FastAPI, Limiter]:
+            limiter = Limiter(redis_client=provider, storage_options={"key_prefix": prefix})
 
-        @asynccontextmanager
-        async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-            async with redis.Redis.from_url(redis_uri, max_connections=1) as connection:
-                app.state.redis = connection
-                async with limiter.lifespan(app):
-                    yield
+            @asynccontextmanager
+            async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+                async with redis.Redis.from_url(redis_uri, max_connections=1) as connection:
+                    app.state.redis = connection
+                    async with limiter.lifespan(app):
+                        yield
 
-        async def endpoint() -> str:
-            return "ok"
+            app = FastAPI(lifespan=lifespan)
 
-        first = FastAPI(lifespan=lifespan)
-        second = FastAPI(lifespan=lifespan)
-        for app in (first, second):
-            app.get("/", dependencies=[Depends(limiter.limit("2/minute"))])(endpoint)
+            @app.get("/", dependencies=[Depends(limiter.limit("2/minute"))])
+            async def endpoint() -> str:
+                return "ok"
+
+            return app, limiter
+
+        first, first_limiter = make_app()
+        second, second_limiter = make_app()
         assert resolved_for == []
 
         async with (
@@ -244,8 +253,8 @@ class TestRedis:
             ) as second_http,
         ):
             async with first.state.redis.client():
-                assert await limiter.check_storage(first) is False
-                assert await limiter.check_storage(second) is True
+                assert await first_limiter.check_storage() is False
+                assert await second_limiter.check_storage() is True
                 assert (await first_http.get("/")).status_code == 503
                 assert (await second_http.get("/")).status_code == 200
             assert (await first_http.get("/")).status_code == 200
@@ -254,6 +263,7 @@ class TestRedis:
 
         async with LifespanManager(first):
             assert resolved_for == [first, second, first]
+            assert await first_limiter.check_storage() is True
 
     async def test_different_strategies_do_not_share_counters(self, *, redis_uri: str) -> None:
         pytest.importorskip("redis.asyncio")

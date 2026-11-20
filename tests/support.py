@@ -8,10 +8,9 @@ from httpx import ASGITransport, AsyncClient
 from fastapi_ratelimits import Limiter, RateLimitHeadersMiddleware
 
 
-@asynccontextmanager
-async def client_for(
+def app_for(
     limiter: Limiter, *, value: str = "2/minute", headers_enabled: bool = False
-) -> AsyncIterator[AsyncClient]:
+) -> FastAPI:
     app = FastAPI(lifespan=limiter.lifespan)
     if headers_enabled:
         app.add_middleware(RateLimitHeadersMiddleware)
@@ -20,6 +19,14 @@ async def client_for(
     async def endpoint() -> str:
         return "ok"
 
+    return app
+
+
+@asynccontextmanager
+async def client_for(
+    limiter: Limiter, *, value: str = "2/minute", headers_enabled: bool = False
+) -> AsyncIterator[AsyncClient]:
+    app = app_for(limiter, value=value, headers_enabled=headers_enabled)
     async with (
         LifespanManager(app),
         AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,

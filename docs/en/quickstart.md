@@ -51,6 +51,10 @@ with `Retry-After` in seconds. Restart the server to reset the in-memory counter
 
 ## Use an existing lifespan
 
+Create a separate `Limiter` for each FastAPI application. Its first lifespan
+entry binds it to that app. The same app can enter again after shutdown or a
+startup failure. A different app attempting to start it raises `RuntimeError`.
+
 Enter `limiter.lifespan(app)` inside the app's lifespan function before it starts
 serving requests. If you have more than one limiter, enter each context. The
 app below uses a fixed window on every operation and a tighter moving window
