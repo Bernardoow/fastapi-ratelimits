@@ -4,14 +4,24 @@ version: 1
 
 reviews:
   custom_rules:
-    - name: Python lockfile consistency
+    - name: Validate uv lockfile consistency
       description: |
-        Verify that uv.lock remains consistent with pyproject.toml when
-        dependencies, Python version constraints (`project.requires-python`),
-        or the project version (`project.version`) change.
+        CRITICAL: Check Python dependency consistency.
 
-        Report inconsistencies and recommend running
-        `uv lock --check`.
+        For every pull request involving Python dependencies:
 
-        Do not require uv.lock to change when the
-        existing lockfile is already valid.
+        1. Inspect pyproject.toml and uv.lock.
+        2. Check whether dependency declarations are
+           consistent with the lockfile.
+        3. Check changes to dependencies, optional dependencies,
+           dependency groups and requires-python.
+        4. If a dependency change makes uv.lock outdated,
+           report it as a review issue.
+        5. Recommend running `uv lock --check`.
+        6. Do not assume the lockfile is valid merely
+           because the uv.lock file exists.
+        7. Do not require a lockfile change when the
+           existing lockfile is still consistent.
+
+        Treat a confirmed outdated lockfile as a bug
+        affecting reproducible builds.
