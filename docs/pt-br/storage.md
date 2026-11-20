@@ -82,6 +82,12 @@ para ver as opções do backend e as
 [opções de conexão do redis-py](https://redis.readthedocs.io/en/v7.2.1/connections.html)
 para parâmetros de conexão, como TLS e pool.
 
+O redis-py pode se reconectar em um comando posterior. Se a aplicação repetir
+a sonda no startup, configure timeouts de conexão e de operação e limite o
+número de tentativas. Repetir `PING` preserva os contadores de cota. Repetir
+um comando de cota pode aplicar a escrita de novo se o Redis o executou e a
+resposta se perdeu.
+
 Para compartilhar uma cota entre workers, acrescente `--workers 2` ao
 comando do Redis. Use o mesmo banco Redis, prefixo de chaves, estratégia e
 configuração de regras em todos os workers.
@@ -118,6 +124,37 @@ e [entre no lifespan de cada um](quickstart.md#use-um-lifespan-existente).
 O nome da estratégia separa os contadores, mesmo quando usam o mesmo storage
 e prefixo. Veja [como as estratégias contam](https://limits.readthedocs.io/en/stable/strategies.html)
 para exemplos ao longo do tempo.
+
+## Verifique a prontidão do storage
+
+Defina `check_storage_on_startup=True` no `Limiter` para consultar o storage
+configurado durante o lifespan do limiter, antes de a aplicação atender
+requisições. A opção funciona com todas as origens de storage e o padrão é
+`False`. O startup falha com `StorageStartupError` se a consulta retornar
+`False` ou lançar uma exceção operacional reconhecida do storage. Quando há
+uma exceção, ela fica disponível como causa.
+
+```python
+from fastapi import FastAPI
+
+from fastapi_ratelimits import Limiter
+
+limiter = Limiter(storage_uri="async+redis://localhost:6379/0", check_storage_on_startup=True)
+app = FastAPI(lifespan=limiter.lifespan)
+```
+
+Importe `StorageStartupError` de `fastapi_ratelimits` para tratar uma falha
+dessa checagem de startup.
+
+Para uma sonda de prontidão ou uma política de startup da aplicação, chame
+`await limiter.check_storage(app)` durante o lifespan ativo do limiter para
+esse app. O método devolve o resultado de `Storage.check()` e propaga exceções
+do backend. Uma chamada sem lifespan ativo para o app lança `RuntimeError`.
+
+No Redis, a consulta usa `PING` e preserva os contadores de cota. Um resultado
+positivo confirma que o Redis respondeu naquele instante. A avaliação das
+regras de cota também depende dos comandos usados por cada estratégia. O
+storage em memória retorna `True`.
 
 ## Compartilhe o cliente Redis da aplicação
 

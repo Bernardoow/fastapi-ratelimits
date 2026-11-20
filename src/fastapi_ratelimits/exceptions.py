@@ -31,6 +31,13 @@ class StorageUnavailable(HTTPException):
         super().__init__(status_code=503, detail="Rate limit storage unavailable")
 
 
+class StorageStartupError(RuntimeError):
+    """The configured startup check could not verify the rate limit storage."""
+
+    def __init__(self) -> None:
+        super().__init__("Rate limit storage check failed during startup")
+
+
 async def storage_unavailable_handler(request: Request, exc: Exception) -> Response:
     if not isinstance(exc, StorageUnavailable):
         raise exc
