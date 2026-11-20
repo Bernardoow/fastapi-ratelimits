@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=https://cubic.dev/schema/cubic-repository-config.schema.json
+
+version: 1
+
+reviews:
+  custom_rules:
+    - name: Python lockfile consistency
+      description: |
+        Verify that uv.lock remains consistent with
+        pyproject.toml when dependencies or Python
+        version constraints are modified.
+
+        Report inconsistencies and recommend running
+        `uv lock --check`.
+
+        Do not require uv.lock to change when the
+        existing lockfile is already valid.
