@@ -6,9 +6,9 @@ reviews:
   custom_rules:
     - name: Python lockfile consistency
       description: |
-        Verify that uv.lock remains consistent with
-        pyproject.toml when dependencies or Python
-        version constraints are modified.
+        Verify that uv.lock remains consistent with pyproject.toml when
+        dependencies, Python version constraints (`project.requires-python`),
+        or the project version (`project.version`) change.
 
         Report inconsistencies and recommend running
         `uv lock --check`.
