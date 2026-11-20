@@ -17,6 +17,10 @@ from .storage import Redis, open_storage, storage_from_redis_client, validate_re
 
 T = TypeVar("T")
 ValueProvider = Callable[..., T | Awaitable[T] | Iterator[T] | AsyncIterator[T]]
+_APP_MISMATCH_ERROR = (
+    "This Limiter is already bound to another FastAPI application. "
+    "Create a separate Limiter for each application."
+)
 _STRATEGIES: Mapping[str, Callable[[Storage], RateLimiter]] = STRATEGIES
 _STRATEGY_METHODS = {
     "moving-window": ("acquire_entry", "get_moving_window"),
@@ -102,10 +106,7 @@ class Limiter:
         if self._app is None:
             self._app = app
         elif self._app is not app:
-            raise RuntimeError(
-                "This Limiter is already bound to another FastAPI application. "
-                "Create a separate Limiter for each application."
-            )
+            raise RuntimeError(_APP_MISMATCH_ERROR)
         if self._lifespan_running:
             raise RuntimeError("Limiter.lifespan is already active for this application")
 
@@ -213,6 +214,8 @@ class Limiter:
                 quote(scope, safe=""),
                 quote(key, safe=""),
             )
+            if self._app is not None and request.app is not self._app:
+                raise RuntimeError(_APP_MISMATCH_ERROR)
             strategy = self._active_strategy
             if strategy is None:
                 raise RuntimeError("Use Limiter.lifespan before serving requests")

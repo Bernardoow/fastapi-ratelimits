@@ -11,6 +11,33 @@ from fastapi_ratelimits import Limiter, RateLimitExceeded
 
 
 class TestStaticLimit:
+    async def test_rejects_rules_from_a_limiter_bound_to_another_app(self) -> None:
+        limiter = Limiter(storage_uri="async+memory://")
+        bound_app = FastAPI(lifespan=limiter.lifespan)
+        other_app = FastAPI()
+        router = APIRouter(dependencies=[Depends(limiter.limit("1/minute"))])
+
+        @router.get("/")
+        async def endpoint() -> str:
+            return "ok"
+
+        bound_app.include_router(router)
+        other_app.include_router(router)
+
+        async with (
+            LifespanManager(bound_app),
+            AsyncClient(
+                transport=ASGITransport(app=bound_app), base_url="http://test"
+            ) as bound_client,
+            AsyncClient(
+                transport=ASGITransport(app=other_app), base_url="http://test"
+            ) as other_client,
+        ):
+            with pytest.raises(RuntimeError, match="already bound to another FastAPI application"):
+                await other_client.get("/")
+            assert (await bound_client.get("/")).status_code == 200
+            assert (await bound_client.get("/")).status_code == 429
+
     @pytest.mark.parametrize("sync_endpoint", [False, True])
     async def test_limits_requests_before_endpoint(self, *, sync_endpoint: bool) -> None:
         limiter = Limiter(storage_uri="async+memory://")
