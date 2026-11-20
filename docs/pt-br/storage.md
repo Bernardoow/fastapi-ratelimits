@@ -90,8 +90,9 @@ resposta se perdeu.
 
 Para compartilhar uma cota entre workers, acrescente `--workers 2` ao
 comando do Redis. Limiters separados em apps ou workers compartilham
-contadores quando usam o mesmo banco Redis, prefixo de chaves, estratégia e
-identificadores da cota. Veja como as regras selecionam um contador em
+contadores quando coincidem o banco Redis, o prefixo de chaves, a estratégia,
+o escopo da rota (ou grupo), a chave do cliente, a quantidade da cota e a
+janela (unidade e multiplicador). Veja como as regras selecionam um contador em
 [Regras e identidade](rules.md).
 
 ### Escolha uma estratégia

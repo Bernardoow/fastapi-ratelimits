@@ -88,8 +88,9 @@ of attempts. Retrying `PING` preserves quota counters. Retrying a quota
 command can apply the write again if Redis executed it and the response was lost.
 
 To run multiple workers against one quota, add `--workers 2` to the Redis
-command. Separate limiters across apps or workers share counters when they
-use the same Redis database, key prefix, strategy, and quota identifiers.
+command. Separate limiters across apps or workers share counters when the
+Redis database, key prefix, strategy, route scope (or group), client key,
+quota amount, and window (unit and multiplier) all match.
 See [rules and identity](rules.md) for how rules select a counter.
 
 ### Select a strategy
