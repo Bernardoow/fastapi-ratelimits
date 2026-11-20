@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from httpx import ASGITransport, AsyncClient
 from support import client_for
 
-from fastapi_ratelimits import Limiter, StorageUnavailable
+from fastapi_ratelimits import Limiter, StorageStartupError, StorageUnavailable
 
 
 @pytest.fixture
@@ -90,6 +90,44 @@ class TestRedis:
                 else {"detail": "Rate limit storage unavailable"}
             )
             assert not executed
+
+    async def test_unreachable_redis_fails_opt_in_startup(self) -> None:
+        pytest.importorskip("redis.asyncio")
+        with socket.socket() as unserved:
+            unserved.bind(("127.0.0.1", 0))
+            port = unserved.getsockname()[1]
+            limiter = Limiter(
+                storage_uri=f"async+redis://127.0.0.1:{port}",
+                storage_options={"socket_connect_timeout": 0.1},
+                check_storage_on_startup=True,
+            )
+            app = FastAPI(lifespan=limiter.lifespan)
+
+            with pytest.raises(StorageStartupError, match="storage check failed during startup"):
+                async with LifespanManager(app):
+                    pytest.fail("The app started with Redis unavailable")
+
+    async def test_storage_checks_leave_redis_quota_intact(self, *, redis_uri: str) -> None:
+        pytest.importorskip("redis.asyncio")
+        limiter = Limiter(
+            storage_uri=f"async+{redis_uri}",
+            storage_options={"key_prefix": f"fastapi-ratelimits-test-{uuid4().hex}"},
+            check_storage_on_startup=True,
+        )
+        app = FastAPI(lifespan=limiter.lifespan)
+
+        @app.get("/", dependencies=[Depends(limiter.limit("2/minute"))])
+        async def endpoint() -> str:
+            return "ok"
+
+        async with (
+            LifespanManager(app),
+            AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client,
+        ):
+            assert (await client.get("/")).status_code == 200
+            assert await limiter.check_storage(app) is True
+            assert (await client.get("/")).status_code == 200
+            assert (await client.get("/")).status_code == 429
 
     async def test_application_owned_redis_survives_limiter_shutdown(
         self, *, redis_uri: str
@@ -206,6 +244,8 @@ class TestRedis:
             ) as second_http,
         ):
             async with first.state.redis.client():
+                assert await limiter.check_storage(first) is False
+                assert await limiter.check_storage(second) is True
                 assert (await first_http.get("/")).status_code == 503
                 assert (await second_http.get("/")).status_code == 200
             assert (await first_http.get("/")).status_code == 200

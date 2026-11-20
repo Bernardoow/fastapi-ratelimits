@@ -6,6 +6,7 @@ Import these names directly from `fastapi_ratelimits`.
 | --- | --- |
 | `Limiter(storage_uri=..., storage_options=..., strategy=...)` or `Limiter(storage=..., strategy=...)` | [Storage sources and strategies](storage.md) |
 | `Limiter(redis_client=..., storage_options=...)` | [Use an existing Redis client or obtain one at startup](storage.md#share-your-applications-redis-client) |
+| `check_storage_on_startup` and `Limiter.check_storage(app)` | [Check storage readiness](storage.md#check-storage-readiness) |
 | `Limiter(key_func=..., route_id_func=...)` | [Client key and route scope](rules.md#choose-the-client-key-and-route-scope) |
 | `Limiter.lifespan(app)` | [Single and composed lifespans](quickstart.md) |
 | `Limiter.limit(value, key_func=..., group=..., cost=..., skip_if=...)` | [Rule options](rules.md) and [FastAPI dependencies](dependencies.md) |
@@ -28,6 +29,7 @@ With `redis_client`, `storage_options` accepts `key_prefix` (default
       members:
         - lifespan
         - limit
+        - check_storage
 
 ## Default identity and route helpers
 
@@ -52,6 +54,8 @@ With `redis_client`, `storage_options` accepts `key_prefix` (default
 ::: fastapi_ratelimits.StorageUnavailable
 
 ::: fastapi_ratelimits.storage_unavailable_handler
+
+::: fastapi_ratelimits.StorageStartupError
 
 ## Warnings
 

@@ -82,6 +82,11 @@ for the backend options and
 [redis-py connection options](https://redis.readthedocs.io/en/v7.2.1/connections.html)
 for the connection parameters, including TLS and pooling.
 
+Redis-py can reconnect on a later command. If the application retries a
+startup probe, configure connection and socket timeouts and bound the number
+of attempts. Retrying `PING` preserves quota counters. Retrying a quota
+command can apply the write again if Redis executed it and the response was lost.
+
 To run multiple workers against one quota, add `--workers 2` to the Redis
 command. All workers should use the same Redis database, key prefix,
 strategy, and rule configuration.
@@ -119,6 +124,38 @@ For different strategies in one app, create separate limiters and
 separate their counters, even in the same storage with the same prefix.
 See [how the strategies count](https://limits.readthedocs.io/en/stable/strategies.html)
 for timing examples.
+
+## Check storage readiness
+
+Set `check_storage_on_startup=True` on `Limiter` to check the configured
+storage during the limiter's lifespan, before the app serves requests. This
+option works with every storage source and defaults to `False`. Startup fails
+with `StorageStartupError` if the check returns `False` or raises a recognized
+storage error. In the latter case, the original exception is available as the
+cause.
+
+```python
+from fastapi import FastAPI
+
+from fastapi_ratelimits import Limiter
+
+limiter = Limiter(storage_uri="async+redis://localhost:6379/0", check_storage_on_startup=True)
+app = FastAPI(lifespan=limiter.lifespan)
+```
+
+Import `StorageStartupError` from `fastapi_ratelimits` to catch an error from
+this startup check.
+
+For a readiness probe or your own startup policy, call
+`await limiter.check_storage(app)` during that application's active limiter
+lifespan. The method returns the result of `Storage.check()` and propagates
+exceptions from the backend. Calling it without an active limiter lifespan
+for that app raises `RuntimeError`.
+
+On Redis, the check uses `PING` and preserves quota counters. A successful
+check confirms that Redis responded at that moment. Evaluating quota rules
+also depends on the commands used by each strategy. The in-memory storage
+returns `True`.
 
 ## Share your application's Redis client
 

@@ -11,7 +11,7 @@ from limits.errors import StorageError
 
 from .callbacks import warn_if_sync
 from .defaults import default_route_id, key_by_ip
-from .exceptions import RateLimitExceeded, StorageUnavailable
+from .exceptions import RateLimitExceeded, StorageStartupError, StorageUnavailable
 from .headers import RateLimitSnapshot, request_snapshots
 from .storage import Redis, open_storage, storage_from_redis_client, validate_redis_client_options
 
@@ -48,6 +48,13 @@ def _validate_cost(cost: int) -> None:
         raise ValueError("cost must be a positive integer")
 
 
+def _storage_failures(storage: Storage) -> tuple[type[Exception], ...]:
+    backend_errors = storage.base_exceptions
+    if isinstance(backend_errors, type):
+        backend_errors = (backend_errors,)
+    return (StorageError, TimeoutError, ConnectionError, *backend_errors)
+
+
 class Limiter:
     """Configure an asynchronous quota strategy and create FastAPI dependencies."""
 
@@ -58,6 +65,7 @@ class Limiter:
         storage: Storage | None = None,
         redis_client: Redis | Callable[[FastAPI], Redis] | None = None,
         storage_options: Mapping[str, Any] | None = None,
+        check_storage_on_startup: bool = False,
         strategy: str = "fixed-window",
         key_func: ValueProvider[str] = key_by_ip,
         route_id_func: ValueProvider[str] = default_route_id,
@@ -78,11 +86,13 @@ class Limiter:
         self._storage_options = dict(storage_options or {})
         if redis_client is not None:
             validate_redis_client_options(options=self._storage_options)
+        self._check_storage_on_startup = check_storage_on_startup
         self._strategy_name = strategy
         warn_if_sync(key_func)
         warn_if_sync(route_id_func)
         self._key_func = key_func
         self._route_id_func = route_id_func
+        # TODO: Bind each Limiter to one FastAPI app so storage checks can omit the app argument.
         self._active: dict[FastAPI, RateLimiter] = {}
 
     @asynccontextmanager
@@ -110,9 +120,24 @@ class Limiter:
                 )
             self._active[app] = _STRATEGIES[self._strategy_name](storage)
             try:
+                if self._check_storage_on_startup:
+                    failures = _storage_failures(storage)
+                    try:
+                        healthy = await storage.check()
+                    except failures as exc:
+                        raise StorageStartupError() from exc
+                    if not healthy:
+                        raise StorageStartupError()
                 yield
             finally:
                 del self._active[app]
+
+    async def check_storage(self, app: FastAPI) -> bool:
+        """Check the active storage for an application and propagate backend errors."""
+        strategy = self._active.get(app)
+        if strategy is None:
+            raise RuntimeError("Use Limiter.lifespan before checking storage")
+        return await strategy.storage.check()
 
     def limit(
         self,
@@ -176,15 +201,7 @@ class Limiter:
             strategy = self._active.get(request.app)
             if strategy is None:
                 raise RuntimeError("Use Limiter.lifespan before serving requests")
-            backend_errors = strategy.storage.base_exceptions
-            if isinstance(backend_errors, type):
-                backend_errors = (backend_errors,)
-            failures: tuple[type[Exception], ...] = (
-                StorageError,
-                TimeoutError,
-                ConnectionError,
-                *backend_errors,
-            )
+            failures = _storage_failures(strategy.storage)
             snapshots = request_snapshots(scope=request.scope)
             try:
                 admitted = await strategy.hit(item, *identifiers, cost=resolved_cost)

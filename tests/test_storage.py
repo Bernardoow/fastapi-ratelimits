@@ -1,9 +1,12 @@
+from unittest.mock import AsyncMock
+
 import pytest
+from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
 from limits.aio.storage import MemoryStorage
 from support import client_for
 
-from fastapi_ratelimits import Limiter
+from fastapi_ratelimits import Limiter, StorageStartupError
 
 
 class TestStorageConfiguration:
@@ -66,6 +69,70 @@ class TestStorageConfiguration:
 
         async with client_for(Limiter(storage=OfflineStorage())) as client:
             assert (await client.get("/")).status_code == 503
+
+
+class TestStorageReadiness:
+    async def test_checks_active_storage_on_demand(
+        self, *, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        storage = MemoryStorage()
+        failure = ConnectionError("Storage disconnected")
+        check = AsyncMock(side_effect=[False, True, failure])
+        monkeypatch.setattr(storage, "check", check)
+        limiter = Limiter(storage=storage)
+        app = FastAPI(lifespan=limiter.lifespan)
+
+        with pytest.raises(RuntimeError, match="Limiter.lifespan"):
+            await limiter.check_storage(app)
+        async with LifespanManager(app):
+            check.assert_not_awaited()
+            with pytest.raises(RuntimeError, match="Limiter.lifespan"):
+                await limiter.check_storage(FastAPI())
+            assert await limiter.check_storage(app) is False
+            assert await limiter.check_storage(app) is True
+            with pytest.raises(ConnectionError) as error:
+                await limiter.check_storage(app)
+            assert error.value is failure
+        with pytest.raises(RuntimeError, match="Limiter.lifespan"):
+            await limiter.check_storage(app)
+        assert check.await_count == 3
+
+    @pytest.mark.parametrize(
+        ("outcome", "error_type"),
+        [
+            (False, StorageStartupError),
+            (TimeoutError("Probe timed out"), StorageStartupError),
+            (ValueError("Declared by MemoryStorage"), StorageStartupError),
+            (TypeError("Unexpected check error"), TypeError),
+        ],
+    )
+    async def test_startup_check_failure_releases_app_state(
+        self,
+        *,
+        monkeypatch: pytest.MonkeyPatch,
+        outcome: bool | Exception,
+        error_type: type[Exception],
+    ) -> None:
+        storage = MemoryStorage()
+        check = AsyncMock(side_effect=[outcome, True])
+        monkeypatch.setattr(storage, "check", check)
+        limiter = Limiter(storage=storage, check_storage_on_startup=True)
+        app = FastAPI(lifespan=limiter.lifespan)
+
+        with pytest.raises(error_type) as error:
+            async with LifespanManager(app):
+                pytest.fail("The app started with a failed storage check")
+        if error_type is StorageStartupError:
+            assert str(error.value) == "Rate limit storage check failed during startup"
+            assert error.value.__cause__ is (outcome if isinstance(outcome, Exception) else None)
+        else:
+            assert error.value is outcome
+        with pytest.raises(RuntimeError, match="Limiter.lifespan"):
+            await limiter.check_storage(app)
+
+        check.assert_awaited_once_with()
+        async with LifespanManager(app):
+            assert check.await_count == 2
 
 
 class TestStrategies:
