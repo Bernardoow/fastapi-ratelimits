@@ -11,6 +11,7 @@ Import these names directly from `fastapi_ratelimits`.
 | `Limiter.lifespan(app)` | [Single and composed lifespans](quickstart.md) |
 | `Limiter.limit(value, key_func=..., group=..., cost=..., skip_if=...)` | [Rule options](rules.md) and [FastAPI dependencies](dependencies.md) |
 | `RateLimitHeadersMiddleware(headers_func=...)`, exceptions, and handlers | [Responses and headers](responses.md) |
+| `rate_limit_responses(schema_429=..., schema_503=...)` | [Document rate limit errors in OpenAPI](responses.md#document-rate-limit-errors-in-openapi) |
 
 ## Limiter
 
@@ -46,6 +47,8 @@ With `redis_client`, `storage_options` accepts `key_prefix` (default
 ::: fastapi_ratelimits.default_rate_limit_headers
 
 ## Exceptions and handlers
+
+::: fastapi_ratelimits.rate_limit_responses
 
 ::: fastapi_ratelimits.RateLimitExceeded
 

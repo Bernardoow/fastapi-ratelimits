@@ -14,6 +14,30 @@ to keep that behavior, or register your own handlers to change the body.
 Preserve `exc.headers` when customizing `429` so clients still receive
 `Retry-After`.
 
+## Document rate limit errors in OpenAPI
+
+Pass `responses=rate_limit_responses()` to a protected operation to show
+`429` and `503` in OpenAPI and Swagger UI. The function describes the default
+JSON bodies and the `Retry-After` header on `429`.
+
+For a router where all operations share a rate limit dependency, declare the
+responses on the router. With a configured `limiter`, use this setup.
+
+```python
+from fastapi import APIRouter, Depends
+
+from fastapi_ratelimits import rate_limit_responses
+
+router = APIRouter(
+    dependencies=[Depends(limiter.limit("2/minute"))],
+    responses=rate_limit_responses(),
+)
+```
+
+For custom handlers that change the JSON body, pass the corresponding JSON
+Schema as `schema_429` or `schema_503`. Each argument replaces only the body
+schema for that status. See the operation below for an example using both.
+
 ## Add quota headers
 
 Enable `RateLimitHeadersMiddleware` for responses with a status below
@@ -56,6 +80,7 @@ from fastapi_ratelimits import (
     StorageUnavailable,
     default_rate_limit_headers,
     rate_limit_exceeded_handler,
+    rate_limit_responses,
     storage_unavailable_handler,
 )
 
@@ -96,10 +121,17 @@ else:
 
 app = FastAPI(lifespan=limiter.lifespan)
 mode = os.environ.get("RESPONSE_MODE")
+responses = rate_limit_responses()
 if mode == "custom":
     app.add_exception_handler(RateLimitExceeded, quota_exceeded)
     app.add_exception_handler(StorageUnavailable, unavailable)
     app.add_middleware(RateLimitHeadersMiddleware, headers_func=quota_headers)
+    error_schema = {
+        "type": "object",
+        "properties": {"error": {"type": "string"}},
+        "required": ["error"],
+    }
+    responses = rate_limit_responses(schema_429=error_schema, schema_503=error_schema)
 else:
     if mode == "builtin":
         app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
@@ -107,7 +139,11 @@ else:
     app.add_middleware(RateLimitHeadersMiddleware)
 
 
-@app.get("/orders", dependencies=[Depends(limiter.limit("2/minute", group="orders", cost=2))])
+@app.get(
+    "/orders",
+    dependencies=[Depends(limiter.limit("2/minute", group="orders", cost=2))],
+    responses=responses,
+)
 async def orders() -> list[str]:
     return []
 ```

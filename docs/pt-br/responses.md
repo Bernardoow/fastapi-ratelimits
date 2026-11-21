@@ -14,6 +14,30 @@ ou registrar handlers próprios para mudar o corpo da resposta. Preserve
 `exc.headers` ao personalizar o `429` para que o cliente continue recebendo
 `Retry-After`.
 
+## Documente os erros de rate limit no OpenAPI
+
+Passe `responses=rate_limit_responses()` a uma operação protegida para exibir
+`429` e `503` no OpenAPI e na interface do Swagger. A função descreve os corpos
+JSON padrão e o cabeçalho `Retry-After` no `429`.
+
+Se todas as operações de um router compartilham a dependência de rate limit,
+declare as respostas no router. Com um `limiter` configurado, use este código.
+
+```python
+from fastapi import APIRouter, Depends
+
+from fastapi_ratelimits import rate_limit_responses
+
+router = APIRouter(
+    dependencies=[Depends(limiter.limit("2/minute"))],
+    responses=rate_limit_responses(),
+)
+```
+
+Para handlers próprios que mudam o corpo JSON, passe o JSON Schema
+correspondente em `schema_429` ou `schema_503`. Cada argumento substitui só o
+esquema do corpo daquele status. A operação abaixo mostra o uso dos dois.
+
 ## Adicione cabeçalhos de cota
 
 Ative `RateLimitHeadersMiddleware` para respostas com status abaixo de
@@ -56,6 +80,7 @@ from fastapi_ratelimits import (
     StorageUnavailable,
     default_rate_limit_headers,
     rate_limit_exceeded_handler,
+    rate_limit_responses,
     storage_unavailable_handler,
 )
 
@@ -96,10 +121,17 @@ else:
 
 app = FastAPI(lifespan=limiter.lifespan)
 mode = os.environ.get("RESPONSE_MODE")
+responses = rate_limit_responses()
 if mode == "custom":
     app.add_exception_handler(RateLimitExceeded, quota_exceeded)
     app.add_exception_handler(StorageUnavailable, unavailable)
     app.add_middleware(RateLimitHeadersMiddleware, headers_func=quota_headers)
+    error_schema = {
+        "type": "object",
+        "properties": {"error": {"type": "string"}},
+        "required": ["error"],
+    }
+    responses = rate_limit_responses(schema_429=error_schema, schema_503=error_schema)
 else:
     if mode == "builtin":
         app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
@@ -107,7 +139,11 @@ else:
     app.add_middleware(RateLimitHeadersMiddleware)
 
 
-@app.get("/orders", dependencies=[Depends(limiter.limit("2/minute", group="orders", cost=2))])
+@app.get(
+    "/orders",
+    dependencies=[Depends(limiter.limit("2/minute", group="orders", cost=2))],
+    responses=responses,
+)
 async def orders() -> list[str]:
     return []
 ```
