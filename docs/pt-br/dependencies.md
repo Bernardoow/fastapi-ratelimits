@@ -11,6 +11,83 @@ chamar a função da rota. Use `Depends` onde você quer aplicar a regra.
 | `app.include_router(router, dependencies=[Depends(rule)])` | As operações registradas por aquela inclusão. |
 | `FastAPI(dependencies=[Depends(rule)])` | Todas as operações HTTP do FastAPI na aplicação, incluindo as dos routers. |
 
+## Reutilize um limiter entre routers
+
+Defina um `Limiter` em um módulo compartilhado. Cada router importa a instância
+e passa a regra completa, com quantidade e janela, a `limiter.limit(...)` dentro
+de `Depends`. Registre os routers e o lifespan do limiter na mesma aplicação.
+
+Crie um pacote `app` com um `__init__.py` vazio e estes quatro módulos.
+
+```python title="app/rate_limits.py"
+from fastapi_ratelimits import Limiter
+
+limiter = Limiter(storage_uri="async+memory://")
+```
+
+```python title="app/orders.py"
+from fastapi import APIRouter, Depends
+
+from .rate_limits import limiter
+
+router = APIRouter(prefix="/orders", dependencies=[Depends(limiter.limit("10/minute"))])
+
+
+@router.get("")
+async def list_orders() -> list[int]:
+    return [1, 2]
+
+
+@router.get("/{order_id}")
+async def get_order(order_id: int) -> dict[str, int]:
+    return {"id": order_id}
+```
+
+```python title="app/reports.py"
+from fastapi import APIRouter, Depends
+
+from .rate_limits import limiter
+
+router = APIRouter(prefix="/reports")
+
+
+@router.get("/summary")
+async def report_summary() -> dict[str, int]:
+    return {"report_count": 1}
+
+
+@router.get("/export", dependencies=[Depends(limiter.limit("1/second"))])
+async def export_report() -> dict[str, str]:
+    return {"format": "csv"}
+```
+
+```python title="app/main.py"
+from fastapi import FastAPI
+
+from .orders import router as orders_router
+from .rate_limits import limiter
+from .reports import router as reports_router
+
+app = FastAPI(lifespan=limiter.lifespan)
+app.include_router(orders_router)
+app.include_router(reports_router)
+```
+
+Depois de seguir a [instalação do início rápido](quickstart.md), execute
+`python -m uvicorn app.main:app` no diretório que contém `app/`.
+
+Cada operação de pedidos permite dez requisições por minuto por IP. Depois
+que `GET /orders` retorna `429`, o mesmo cliente ainda pode chamar
+`GET /orders/1` com a cota própria dessa operação. Em um servidor recém-iniciado,
+duas requisições a `GET /reports/export` com menos de um segundo de intervalo
+retornam `200` e `429`. `GET /reports/summary` continua retornando `200`.
+
+Para aplicar uma regra a todas as operações HTTP do app, importe `Depends` em
+`app/main.py` e adicione `dependencies=[Depends(limiter.limit("100/minute"))]`
+à chamada de `FastAPI(...)`. As regras de routers e operações também se aplicam. Use
+[`group`](rules.md#compartilhe-uma-cota-e-resolva-valores-por-requisicao)
+quando várias operações precisarem consumir a mesma cota.
+
 ## Aplique regras em cada nível
 
 Com a [instalação do início rápido](quickstart.md), salve o exemplo como `app.py`

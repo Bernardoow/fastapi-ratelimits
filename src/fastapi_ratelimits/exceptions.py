@@ -6,6 +6,9 @@ from fastapi.exception_handlers import http_exception_handler
 from limits import RateLimitItem
 from starlette.responses import Response
 
+_RATE_LIMIT_EXCEEDED_DETAIL = "Rate limit exceeded"
+_STORAGE_UNAVAILABLE_DETAIL = "Rate limit storage unavailable"
+
 
 class RateLimitExceeded(HTTPException):
     def __init__(self, *, limit: RateLimitItem, reset_at: float, cost: int, scope: str) -> None:
@@ -15,7 +18,7 @@ class RateLimitExceeded(HTTPException):
         self.scope = scope
         super().__init__(
             status_code=429,
-            detail="Rate limit exceeded",
+            detail=_RATE_LIMIT_EXCEEDED_DETAIL,
             headers={"Retry-After": str(max(1, math.ceil(reset_at - time.time())))},
         )
 
@@ -28,7 +31,7 @@ async def rate_limit_exceeded_handler(request: Request, exc: Exception) -> Respo
 
 class StorageUnavailable(HTTPException):
     def __init__(self) -> None:
-        super().__init__(status_code=503, detail="Rate limit storage unavailable")
+        super().__init__(status_code=503, detail=_STORAGE_UNAVAILABLE_DETAIL)
 
 
 class StorageStartupError(RuntimeError):

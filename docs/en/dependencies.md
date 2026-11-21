@@ -12,6 +12,83 @@ rule to apply.
 | `app.include_router(router, dependencies=[Depends(rule)])` | The operations registered by that particular inclusion. |
 | `FastAPI(dependencies=[Depends(rule)])` | All FastAPI HTTP operations in the app, including its routers. |
 
+## Reuse a limiter across routers
+
+Define one `Limiter` in a shared module. Each router imports it and passes a
+full rule, including the quantity and window, to `limiter.limit(...)` inside
+`Depends`. Register the routers and the limiter's lifespan on the same app.
+
+Create an `app` package with an empty `__init__.py` and these four modules.
+
+```python title="app/rate_limits.py"
+from fastapi_ratelimits import Limiter
+
+limiter = Limiter(storage_uri="async+memory://")
+```
+
+```python title="app/orders.py"
+from fastapi import APIRouter, Depends
+
+from .rate_limits import limiter
+
+router = APIRouter(prefix="/orders", dependencies=[Depends(limiter.limit("10/minute"))])
+
+
+@router.get("")
+async def list_orders() -> list[int]:
+    return [1, 2]
+
+
+@router.get("/{order_id}")
+async def get_order(order_id: int) -> dict[str, int]:
+    return {"id": order_id}
+```
+
+```python title="app/reports.py"
+from fastapi import APIRouter, Depends
+
+from .rate_limits import limiter
+
+router = APIRouter(prefix="/reports")
+
+
+@router.get("/summary")
+async def report_summary() -> dict[str, int]:
+    return {"report_count": 1}
+
+
+@router.get("/export", dependencies=[Depends(limiter.limit("1/second"))])
+async def export_report() -> dict[str, str]:
+    return {"format": "csv"}
+```
+
+```python title="app/main.py"
+from fastapi import FastAPI
+
+from .orders import router as orders_router
+from .rate_limits import limiter
+from .reports import router as reports_router
+
+app = FastAPI(lifespan=limiter.lifespan)
+app.include_router(orders_router)
+app.include_router(reports_router)
+```
+
+After following the [quickstart installation](quickstart.md), run
+`python -m uvicorn app.main:app` from the directory containing `app/`.
+
+Each operation in the orders router allows ten requests per minute per IP. After
+`GET /orders` returns `429`, the same client can still call `GET /orders/1`
+under its own quota. Two requests to `GET /reports/export` less than a second
+apart return `200` and `429` on a fresh server. `GET /reports/summary` still
+returns `200`.
+
+To apply a rule to all HTTP operations in the app, import `Depends` in
+`app/main.py` and add `dependencies=[Depends(limiter.limit("100/minute"))]`
+to the `FastAPI(...)` call. Any router or operation rules also apply. Use
+[`group`](rules.md#share-a-quota-and-resolve-values-per-request) when multiple
+operations should consume the same quota.
+
 ## Apply rules at each level
 
 With the [quickstart installation](quickstart.md), save this app as `app.py` and
